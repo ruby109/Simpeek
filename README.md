@@ -1,5 +1,7 @@
 # simpeek
 
+English | [简体中文](README.zh-CN.md)
+
 iOS Simulator network traffic for humans and AI agents. GraphQL-aware, stored locally, streamable.
 
 ```
@@ -14,18 +16,35 @@ No proxy, no certificates, no app code changes: the app is relaunched with
 `~/.simpeek/<bundleId>/<session>.ndjson` (HAR 1.2-shaped `start` / `end` lines; bodies over 64KB
 go to `~/.simpeek/<bundleId>/<session>/<id>.req|.res`). The newest 20 launches per app are kept.
 
-## Setup
+## Install
 
-```sh
-ios/scripts/build-dylib.sh                                # → ios/build/SimPeek.dylib
-cd cli && npm install                                     # Node 24+, runs the .ts sources directly
-cli/bin/simpeek.js project <bundle-id> <path/to/app/repo>  # where GraphQL operations are defined
+Claude Code plugin (the MCP server and a skill that teaches the agent loop):
+
+```
+/plugin install simpeek --marketplace ruby109/Simpeek
 ```
 
-MCP (Claude Code), run from the simpeek checkout:
+On Claude Code versions without the one-step form: `/plugin marketplace add ruby109/Simpeek`, then `/plugin install simpeek@simpeek`.
+
+npm (macOS, Node 24+; the package includes the prebuilt simulator dylib):
 
 ```sh
-claude mcp add -s user simpeek -- "$PWD/cli/bin/simpeek.js" mcp
+npm install -g simpeek
+claude mcp add -s user simpeek -- simpeek mcp     # other MCP clients: command `simpeek`, argument `mcp`
+```
+
+From a checkout:
+
+```sh
+ios/scripts/build-dylib.sh                         # → ios/build/SimPeek.dylib
+cd cli && npm install                              # runs the .ts sources directly
+cli/bin/simpeek.js --help
+```
+
+Then tell simpeek where the app's GraphQL operations are defined:
+
+```sh
+simpeek project <bundle-id> <path/to/app/repo>
 ```
 
 ## Use
@@ -78,6 +97,11 @@ files on disk keep the raw values and are readable only by you (0600 / 0700).
 - Simulator only (the dylib is built for the iOS Simulator).
 
 ## TODO
+
+Distribution:
+
+- [ ] Homebrew tap.
+- [ ] `Package.swift` at the repository root, so that apps can add the SimPeek package by URL.
 
 GraphQL (Apollo iOS and other clients):
 
