@@ -1,0 +1,16 @@
+{
+  "name": "simpeek",
+  "owner": {
+    "name": "ruby109"
+  },
+  "metadata": {
+    "description": "iOS Simulator network traffic and logs for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "simpeek",
+      "source": "./plugin",
+      "description": "See what an iOS Simulator app sends and receives: URLSession traffic (GraphQL-aware) and app logs, without a proxy or app changes."
+    }
+  ]
+}

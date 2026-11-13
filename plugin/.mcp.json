@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "simpeek": {
+      "command": "npx",
+      "args": ["-y", "simpeek@0.1.0", "mcp"]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "simpeek",
+  "description": "See what an iOS Simulator app sends and receives: URLSession traffic (GraphQL-aware) and app logs, without a proxy or app changes.",
+  "version": "0.1.0",
+  "author": {
+    "name": "ruby109"
+  },
+  "homepage": "https://github.com/ruby109/Simpeek",
+  "repository": "https://github.com/ruby109/Simpeek",
+  "license": "MIT",
+  "keywords": ["ios", "simulator", "network", "graphql", "logs"]
+}
