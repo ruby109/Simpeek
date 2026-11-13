@@ -3,3 +3,7 @@ ios/build/
 ios/.build/
 ios/.swiftpm/
 .DS_Store
+cli/dist/
+cli/vendor/
+cli/README.md
+cli/LICENSE

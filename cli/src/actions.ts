@@ -6,8 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { listSessions, loadSession, ROOT, SessionReader, type Entry, type SessionInfo } from './store.ts';
 import { applyFilters, type Filters } from './views.ts';
 
-export const DYLIB = process.env.SIMPEEK_DYLIB
-  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../ios/build/SimPeek.dylib');
+// A checkout uses the dylib built by ios/scripts/build-dylib.sh; the published package ships one in vendor/.
+const here = path.dirname(fileURLToPath(import.meta.url));
+const built = path.resolve(here, '../../ios/build/SimPeek.dylib');
+const vendored = path.resolve(here, '../vendor/SimPeek.dylib');
+export const DYLIB = process.env.SIMPEEK_DYLIB || (fs.existsSync(built) || !fs.existsSync(vendored) ? built : vendored);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
