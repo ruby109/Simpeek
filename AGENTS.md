@@ -23,6 +23,7 @@ cli/                  simpeek CLI and MCP server (TypeScript, run directly by No
   scripts/build.js    builds the npm package: src/*.ts → dist/*.js, dylib → vendor/ (both git-ignored)
 plugin/               Claude Code plugin: .mcp.json (runs the npm package through npx) and a skill
 .claude-plugin/       marketplace manifest that makes this repository a plugin marketplace
+.github/workflows/    publish.yml: publishes cli/ to npm when a v* tag is pushed
 ```
 
 Data flow: the app (with SimPeek injected or linked) writes `~/.simpeek/<bundle>/<session>.ndjson`, one `start` and one `end` line per request, and bodies over 64KB as side files. The CLI and MCP server only read those files. Nothing listens on a port.
@@ -54,7 +55,7 @@ There are no automated tests yet.
 
 ## Release
 
-The version is written in four places and they must match: `cli/package.json`, `cli/package-lock.json`, the `McpServer` version in `cli/src/mcp.ts`, and `plugin/.claude-plugin/plugin.json` together with the `simpeek@<version>` argument in `plugin/.mcp.json`. Publish to npm first (`cd cli && npm publish`; `prepack` rebuilds the dylib and `dist/`), then push and tag `v<version>`. The plugin starts the MCP server with `npx simpeek@<version>`, so pushing a plugin version before that npm version exists breaks it for users.
+The version is written in four places and they must match: `cli/package.json`, `cli/package-lock.json`, the `McpServer` version in `cli/src/mcp.ts`, and `plugin/.claude-plugin/plugin.json` together with the `simpeek@<version>` argument in `plugin/.mcp.json`. Releases are published by `.github/workflows/publish.yml`: push `master`, then push the tag `v<version>`. The workflow builds the dylib on a macOS runner, checks that the tarball runs from `node_modules`, and publishes through npm trusted publishing (OIDC), so no npm token is stored anywhere. Do not run `npm publish` from a local machine. The plugin starts the MCP server with `npx simpeek@<version>`, so after pushing, check that the workflow succeeded: until it does, the new plugin version cannot start.
 
 ## Conventions
 

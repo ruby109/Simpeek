@@ -1,0 +1,38 @@
+# Publishes cli/ to npm when a v* tag is pushed. Authenticates with npm trusted publishing (OIDC),
+# so there is no token: the package's trusted publisher on npmjs.com must name this repository
+# and this workflow file.
+name: Publish
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  npm:
+    runs-on: macos-latest   # the dylib is built with the iOS Simulator SDK
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Use an npm that supports trusted publishing
+        run: npm install -g npm@latest
+      - name: Check that the tag matches the package version
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - run: npm ci
+      - name: Check that the packed tarball runs from node_modules
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP" && mkdir smoke && cd smoke && npm init -y > /dev/null
+          npm install "$RUNNER_TEMP"/simpeek-*.tgz
+          ./node_modules/.bin/simpeek --help
+          lipo -info node_modules/simpeek/vendor/SimPeek.dylib
+      - run: npm publish
