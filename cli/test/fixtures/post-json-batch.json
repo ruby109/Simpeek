@@ -1,0 +1,49 @@
+{
+  "source": "0.1.0 behavior",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/api/graphql",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "[{\"query\":\"query A{a}\"},{\"query\":\"query B{b}\"}]"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content": {
+      "mimeType": "application/json",
+      "text": "[{\"data\":{\"a\":1}},{\"data\":{\"b\":2}}]"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "query",
+        "name": "A",
+        "hash": null,
+        "hasQuery": true,
+        "variables": null
+      },
+      {
+        "type": "query",
+        "name": "B",
+        "hash": null,
+        "hasQuery": true,
+        "variables": null
+      }
+    ],
+    "outcome": {
+      "status": "ok",
+      "codes": [],
+      "parts": null,
+      "incomplete": false
+    }
+  }
+}

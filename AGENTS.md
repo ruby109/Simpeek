@@ -21,9 +21,10 @@ cli/                  simpeek CLI and MCP server (TypeScript, run directly by No
   src/mcp.ts          MCP tools
   src/cli.ts          CLI commands
   scripts/build.js    builds the npm package: src/*.ts → dist/*.js, dylib → vendor/ (both git-ignored)
+  test/               unit tests; fixtures/ holds requests and responses in session-file field names
 plugin/               Claude Code plugin: .mcp.json (runs the npm package through npx) and a skill
 .claude-plugin/       marketplace manifest that makes this repository a plugin marketplace
-.github/workflows/    publish.yml: publishes cli/ to npm when a v* tag is pushed
+.github/workflows/    test.yml: unit tests on push and pull request; publish.yml: tests, then npm publish on a v* tag
 ```
 
 Data flow: the app (with SimPeek injected or linked) writes `~/.simpeek/<bundle>/<session>.ndjson`, one `start` and one `end` line per request, and bodies over 64KB as side files. The CLI and MCP server only read those files. Nothing listens on a port.
@@ -51,11 +52,11 @@ MCP smoke test: pipe `initialize`, `notifications/initialized` and `tools/list` 
 
 Package check: `cd cli && npm pack`, install the tarball into an empty directory, and run `simpeek --help` and the MCP smoke test from there. Node does not strip types under `node_modules`, so the package must run from `dist/` and must not import any `.ts` file. Plugin check: `claude plugin validate .` and `claude plugin validate ./plugin`.
 
-There are no automated tests yet.
+`cd cli && npm test` runs the unit tests (Node's built-in runner). Add a fixture in `cli/test/fixtures/` for every request or response shape you add or fix; a fixture's `source` says where its content comes from, and `todo` marks a fixture whose behavior is not implemented yet. The recorder and the simulator actions have no automated tests; verify them end to end as described above.
 
 ## Release
 
-The version is written in four places and they must match: `cli/package.json`, `cli/package-lock.json`, the `McpServer` version in `cli/src/mcp.ts`, and `plugin/.claude-plugin/plugin.json` together with the `simpeek@<version>` argument in `plugin/.mcp.json`. Releases are published by `.github/workflows/publish.yml`: push `master`, then push the tag `v<version>`. The workflow builds the dylib on a macOS runner, checks that the tarball runs from `node_modules`, and publishes through npm trusted publishing (OIDC), so no npm token is stored anywhere. Do not run `npm publish` from a local machine. The plugin starts the MCP server with `npx simpeek@<version>`, so after pushing, check that the workflow succeeded: until it does, the new plugin version cannot start.
+The version is written in four places and they must match: `cli/package.json`, `cli/package-lock.json`, the `McpServer` version in `cli/src/mcp.ts`, and `plugin/.claude-plugin/plugin.json` together with the `simpeek@<version>` argument in `plugin/.mcp.json`. Releases are published by `.github/workflows/publish.yml`: push `master`, then push the tag `v<version>`. The workflow builds the dylib on a macOS runner, runs the unit tests, checks that the tarball runs from `node_modules`, and publishes through npm trusted publishing (OIDC), so no npm token is stored anywhere. Do not run `npm publish` from a local machine. The plugin starts the MCP server with `npx simpeek@<version>`, so after pushing, check that the workflow succeeded: until it does, the new plugin version cannot start.
 
 ## Conventions
 

@@ -1,0 +1,30 @@
+{
+  "source": "0.1.0 behavior",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/api/graphql",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "{\"query\":\"# note\\nmutation M{m}\"}"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "mutation",
+        "name": "M",
+        "hash": null,
+        "hasQuery": true,
+        "variables": null
+      }
+    ],
+    "outcome": null
+  }
+}

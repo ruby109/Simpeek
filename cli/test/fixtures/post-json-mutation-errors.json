@@ -1,0 +1,44 @@
+{
+  "source": "0.1.0 behavior",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/api/graphql",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "{\"query\":\"mutation UpdatePost{updatePost{id}}\"}"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content": {
+      "mimeType": "application/json",
+      "text": "{\"errors\":[{\"message\":\"no\",\"extensions\":{\"code\":\"FORBIDDEN\"}}]}"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "mutation",
+        "name": "UpdatePost",
+        "hash": null,
+        "hasQuery": true,
+        "variables": null
+      }
+    ],
+    "outcome": {
+      "status": "errors",
+      "codes": [
+        "FORBIDDEN"
+      ],
+      "parts": null,
+      "incomplete": false
+    }
+  }
+}

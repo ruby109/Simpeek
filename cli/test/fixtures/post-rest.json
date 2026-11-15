@@ -1,0 +1,29 @@
+{
+  "source": "0.1.0 behavior",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/api/login",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "{\"user\":\"a\"}"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content": {
+      "mimeType": "application/json",
+      "text": "{\"ok\":true}"
+    }
+  },
+  "expect": {
+    "ops": null,
+    "outcome": null
+  }
+}

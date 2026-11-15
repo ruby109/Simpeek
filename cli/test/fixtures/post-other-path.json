@@ -1,0 +1,30 @@
+{
+  "source": "0.1.0 behavior",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/v2/gateway",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "{\"query\":\"query Q{q}\"}"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "query",
+        "name": "Q",
+        "hash": null,
+        "hasQuery": true,
+        "variables": null
+      }
+    ],
+    "outcome": null
+  }
+}

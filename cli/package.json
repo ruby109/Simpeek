@@ -13,7 +13,8 @@
   ],
   "scripts": {
     "build": "node --no-warnings scripts/build.js",
-    "prepack": "sh ../ios/scripts/build-dylib.sh && npm run build"
+    "prepack": "sh ../ios/scripts/build-dylib.sh && npm run build",
+    "test": "d=$(mktemp -d); SIMPEEK_DIR=\"$d\" SIMPEEK_PROJECT= SIMPEEK_EXCLUDE= node --no-warnings --test \"test/**/*.test.ts\"; s=$?; rm -rf \"$d\"; exit $s"
   },
   "engines": {
     "node": ">=24"

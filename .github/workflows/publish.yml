@@ -28,6 +28,7 @@ jobs:
       - name: Check that the tag matches the package version
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - run: npm ci
+      - run: npm test
       - name: Check that the packed tarball runs from node_modules
         run: |
           npm pack --pack-destination "$RUNNER_TEMP"
