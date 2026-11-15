@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { launch, waitFor } from './actions.ts';
 import { readLogs, type Source } from './logs/sources.ts';
 import { logLine, timeline } from './logs/view.ts';
-import { addMark, listSessions, loadSession, resolveSession } from './store.ts';
+import { addMark, listSessions, loadSession, resolveSession, sessionEnded } from './store.ts';
 import { applyFilters, clock, detail, opsTable, row, sinceToMs } from './views.ts';
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
@@ -76,6 +76,7 @@ export async function serve() {
       const lines = shown.map((e) => row(e, info));
       const foot = [`session ${info.session} (${info.bundle})`, `showing ${shown.length}/${kept.length}`];
       if (hidden) foot.push(`${hidden} noise hidden (all=true)`);
+      if (sessionEnded(info)) foot.push('ended: the app is no longer running; net_launch starts a new session');
       foot.push(`nextCursor ${nextCursor}`);
       return text([...lines, '', foot.join(' · ')].join('\n'));
     } catch (e) {

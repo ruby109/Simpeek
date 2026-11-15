@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { launch } from './actions.ts';
 import { followLogs, readLogs, type Source } from './logs/sources.ts';
 import { logLine, timeline } from './logs/view.ts';
-import { addMark, bodyText, listSessions, loadSession, readConfig, resolveSession, SessionReader, writeConfig, type SessionInfo } from './store.ts';
+import { addMark, bodyText, listSessions, loadSession, readConfig, resolveSession, SessionReader, sessionEnded, writeConfig, type SessionInfo } from './store.ts';
 import { applyFilters, clock, detail, opsTable, pick, row, sinceToMs, tailLine, type Filters } from './views.ts';
 
 const USAGE = `simpeek — iOS Simulator network traffic for humans and agents
@@ -148,7 +148,8 @@ if (!cmd || o.help) {
   const info = session();
   const { kept, hidden } = applyFilters(loadSession(info).all(), info, filters);
   for (const e of kept.slice(-Number(o.limit ?? 30))) console.log(row(e, info));
-  console.log(`\nsession ${info.session} (${info.bundle}) · ${kept.length} shown${hidden ? ` · ${hidden} noise hidden (--all)` : ''}`);
+  const ended = sessionEnded(info) ? ' · ended: the app is no longer running; `simpeek launch` starts a new session' : '';
+  console.log(`\nsession ${info.session} (${info.bundle}) · ${kept.length} shown${hidden ? ` · ${hidden} noise hidden (--all)` : ''}${ended}`);
 } else if (cmd === 'get') {
   const info = session();
   const e = loadSession(info).entries.get(Number(args[0]));

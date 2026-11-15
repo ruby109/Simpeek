@@ -1,4 +1,5 @@
 // Reads the NDJSON session files written by the SimPeek dylib (see ios/Sources/SimPeek/Recorder.swift).
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -171,6 +172,26 @@ export function bodyText(info: SessionInfo, body?: Body): string | undefined {
 }
 
 // ---- marks: named points in time for "since" filters ----
+
+/**
+ * Whether the app process that wrote a session has exited. Simulator apps are host processes, so
+ * the recorded pid can be checked directly; a pid reused by a process that started after the
+ * session counts as exited. Undefined when the session has no pid.
+ */
+export function sessionEnded(info: SessionInfo): boolean | undefined {
+  const pid = Number(info.meta.pid);
+  if (!Number.isInteger(pid) || pid <= 0) return undefined;
+  try {
+    process.kill(pid, 0);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ESRCH') return true;
+    if ((e as NodeJS.ErrnoException).code !== 'EPERM') return undefined;
+  }
+  const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
+  const procStart = Date.parse(ps.stdout.trim());
+  const sessionStart = Date.parse(String(info.meta.startedDateTime));
+  return Number.isFinite(procStart) && Number.isFinite(sessionStart) && procStart > sessionStart + 1000;
+}
 
 const MARKS = path.join(ROOT, 'marks.ndjson');
 
