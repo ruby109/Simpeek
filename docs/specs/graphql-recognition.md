@@ -1,7 +1,7 @@
 # GraphQL recognition for persisted queries, GET and deferred responses, with the first automated tests
 
 *   **Author:** ruby109
-*   **Status:** Draft 4 (revised after three review rounds, see [the review](graphql-recognition-review.md))
+*   **Status:** Draft 4, Phase 0 done (see "Phase 0 results"); revised after three review rounds, see [the review](graphql-recognition-review.md)
 *   **Date:** 2026-11-13
 
 --------------------------------------------------------------------------------
@@ -93,9 +93,9 @@ deferred responses. 0.1.0 shows them wrongly:
 
 | # | Shape | 0.1.0 shows | Correct |
 |---|---|---|---|
-| 1 | Persisted query (APQ): `operationName` and `extensions.persistedQuery`, no `query` | `POST host/graphql` | `Q Posts`, or `? Posts` when the type cannot be known |
+| 1 | Persisted query (APQ): `operationName` and `extensions.persistedQuery`, no `query` | `POST host/path` (GraphQL with zero operations on a `/graphql` path, a plain line elsewhere) | `Q Posts`, or `? Posts` when the type cannot be known |
 | 2 | APQ miss: the server answers `PersistedQueryNotFound`, the client retries with the document | `✗ PERSISTED_QUERY_NOT_FOUND` | Not a failure when the retry follows |
-| 3 | GET to a `/graphql` path with `query`, `operationName`, `variables` in the URL | `GET host/graphql?query=…` (the full query string) | `Q Posts` |
+| 3 | GET with `query`, `operationName`, `variables` (and, from Apollo iOS 2.x, `extensions`) in the URL | `GET host/path?query=…` (the full query string) | `Q Posts` |
 | 4 | `@defer` response as `multipart/mixed` | `✗ invalid JSON` | `ok`; or a failure when a part carries an error or the response is incomplete |
 | 5 | Document that starts with `fragment` definitions | `Q (anonymous)`, or `Q UpdatePost` when `operationName` is sent: the letter is wrong for a mutation | `M UpdatePost` |
 | 6 | Operation defined on one line in a string literal, `"query Foo { … }"` | No `source` line in `get` | `source` line |
@@ -138,23 +138,19 @@ There are no automated tests.
     completes, so a live subscription has no outcome. Stays in the TODO.
 *   No `Content-Type: application/graphql` bodies.
 *   No detection of GraphQL by request headers.
-*   No GET recognition on paths that do not end in `/graphql`, unless the URL carries a
-    persisted-query hash. This is a trade-off: a client configured with another endpoint path and
-    `useGETForQueries` stays a REST line, in exchange for no REST request ever being taken for
-    GraphQL because of a `query` parameter. Phase 0 records the endpoint path the sample uses.
+*   No GET recognition on paths that do not end in `/graphql`, unless the URL has an `extensions`
+    parameter that is a JSON object. Apollo iOS 2.x sends one with every request (Phase 0), so its
+    GET requests are recognized on any path; a client that sends GET documents without
+    `extensions` to another path stays a REST line. In exchange, a REST request is never taken for
+    GraphQL because of a `query` parameter.
 *   No merging of incremental payloads into one result.
 *   No REST items from the TODO.
 
 ## Open Questions
 
-*   **Sample app for Phase 0**: the candidate is Apollo's iOS tutorial app. Whether it builds with
-    the installed Xcode, which Apollo iOS version it uses, and whether its server supports
-    persisted queries and `@defer` are unknown. Phase 0 has a fixed outcome when it cannot be used.
-*   **Apollo iOS 2.x**: Apollo iOS 1.15.0 adds `X-APOLLO-OPERATION-TYPE` in `HTTPRequest.swift`
-    (source read, not recorded; the spelling of the value is not confirmed). It was not found in
-    the request code on `main` (2.x).
-*   **Miss-to-retry interval**: the window W in "Retried and abandoned misses" is set to 5 seconds
-    without a measurement. Phase 0 records the interval.
+*   **Apollo iOS 1.x**: 1.15.0 adds `X-APOLLO-OPERATION-TYPE` in `HTTPRequest.swift` (source read,
+    not recorded; the spelling of the value is not confirmed). Phase 0 recorded 2.5.0 only, which
+    does not send it.
 *   **Servers that answer a miss with HTTP 4xx**: not checked. The design does not depend on it.
 
 ## Critical User Journeys (CUJs)
@@ -258,8 +254,9 @@ Files that change: `cli/src/graphql.ts`, `views.ts`, `store.ts` (lossy decoding)
 | JSON | The request body text is not empty | The body as JSON: one object or an array of objects. As today. |
 | URL | No body, or an empty body | The parameters of `request.url`, parsed with `URLSearchParams` (first occurrence of each name; the HAR `queryString` field is not used): `query`, `operationName`, `variables`, `extensions`. The last two are JSON; a value that does not parse is treated as absent. |
 
-The URL carrier is used only when the path ends in `/graphql`, or `extensions` holds a
-persisted-query hash.
+The URL carrier is used only when the path ends in `/graphql`, or the `extensions` parameter
+parses as a JSON object. Apollo iOS 2.5.0 sends `extensions` (with `clientLibrary`) on every
+request, and the default path of Apollo Server's standalone mode is `/` (Phase 0).
 
 In either carrier, an object is an operation when it has a `query` string (of any content, as
 today), or when `extensions.persistedQuery.sha256Hash` is a string.
@@ -318,8 +315,10 @@ is still parsed.
 *   **Single document**: as today, with the rule above.
 *   **`multipart/mixed`** (media type compared without regard to case): the boundary is the
     `boundary` parameter (name without regard to case, quotes removed). A *delimiter* is a line that
-    starts with `--<boundary>`. If there is no boundary parameter or no delimiter line, the body is
-    read as a single document. Otherwise each piece between delimiters that contains a blank line
+    is exactly `--<boundary>`, and the *closing delimiter* a line that is exactly `--<boundary>--`
+    (trailing whitespace ignored). With Apollo Server's `boundary="-"` these are `---` and `-----`.
+    If there is no boundary parameter or no delimiter line, the body is read as a single
+    document. Otherwise each piece between delimiters that contains a blank line
     is a *part*; its header block may be empty; its body is the text after the first blank line,
     trimmed. A part with an empty body is ignored. A part is *readable* when its body parses as a
     JSON object.
@@ -356,7 +355,8 @@ maps (nothing is kept at module level). Each run replaces the previous results.
     M is *retried* when all its hashes are retried. When some hash has no such entry, M is
     *abandoned* if another entry of the session started at least W seconds after M's arrival, or a
     newer session of the same app exists; otherwise M is *pending*.
-    W is 5 seconds, a provisional value until Phase 0 measures the interval.
+    W is 2 seconds. Phase 0 measured 0 to 7 ms from a miss's arrival to the start of its retry
+    (Apollo iOS 2.5.0); twice that is below the 2 s minimum.
 
 The result depends only on the session files, not on the time the command runs.
 
@@ -412,12 +412,12 @@ directory afterwards.
 | Risk | Mitigation |
 |---|---|
 | Fixtures and code come from the same reading of a protocol. | Phase 0 runs first. Rows 1 to 4 ship only with at least one fixture whose `source` is a recording or a wire example published in a document under "Additional Resources". Hand-written fixtures are added beside them. |
-| A REST request is taken for GraphQL. | The only new recognition off `/graphql` paths is a request carrying `extensions.persistedQuery.sha256Hash`. Fixtures `get-rest-search`, `get-rest-braces`, `get-document-other-path`, `post-rest`. |
+| A REST request is taken for GraphQL. | The only new recognition off `/graphql` paths is a JSON body with a persisted-query hash, or a URL whose `extensions` parameter is a JSON object. Fixtures `get-rest-search`, `get-rest-braces`, `get-rest-extensions-string`, `get-document-other-path`, `post-rest`. |
 | The scanner disagrees with GraphQL syntax in a case not listed. | It reads top-level structure only and never throws. A wrong result gives a wrong letter or name, which also affects `--type`, `ops` grouping and the types learned from that document. `scan.test.ts` lists the cases. |
 | A miss is shown as a non-failure although the client gave up. | It becomes a failure once the session shows that no retry came. A silent session that is not relaunched keeps it pending; `net_wait` returns it with a note on timeout. |
-| W is wrong for a client. | Too short: a slow retry shows the miss as failed until the session is read again after the retry. Too long: an abandoned miss stays pending longer. Phase 0 measures; the value is one constant. |
+| W is wrong for a client. | Too short: a slow retry shows the miss as failed until the session is read again after the retry. Too long: an abandoned miss stays pending longer. Phase 0 measured 7 ms at most for Apollo iOS 2.5.0, against W = 2 s. |
 | The pass adds work to every command. | It reads request bodies (which `list` already reads) and responses of hash-only requests only. Measured in Phase 3; see the Verification Plan for the limit and what happens if it is exceeded. |
-| Hash-only requests show `?` when there is no type header and the document never appears in the session. | Accepted for 0.2.0 and written in the README. Alternative E is the follow-up. |
+| Hash-only requests show `?` when there is no type header and the document never appears in the session. | Phase 0 showed that Apollo iOS 2.5.0 sends no type header, so this is the normal case on every launch after the server has learned a hash. Accepted for 0.2.0 and written in the README; "Future Improvements" lists two follow-ups. |
 | Secrets in a GET URL. | The query string is not printed when operations were read from it. Other query strings are printed as today. |
 | The first tests give false confidence about the recorder. | `AGENTS.md` states that the recorder and simulator actions have no automated tests. |
 
@@ -457,8 +457,9 @@ For APQ the hash is the SHA-256 of the document, so a hash has one type, and the
 may hold the request that registered it.
 
 *   **Cons**: One session's output depends on other files, which rotate out.
-*   **Reason for Rejection**: Deferred until Phase 0 shows whether current clients send the type
-    header.
+*   **Reason for Rejection**: Deferred to a follow-up. Phase 0 showed that Apollo iOS 2.5.0 sends no
+    type header, so it would help; but a server keeps its hash cache across app launches, so the
+    registering request is often older than the 20 kept sessions.
 
 ### Alternative F: Detect GraphQL by headers, or accept GET documents on any path
 
@@ -505,10 +506,40 @@ may hold the request that registered it.
 
 *   Uploads, subscriptions over HTTP, `application/graphql` (README TODO).
 *   Types from older sessions (Alternative E).
+*   Type of a hash-only request from the registered source directory: Apollo iOS generated code
+    contains each operation's `operationIdentifier` (the hash) next to its definition, so `get` can
+    map a hash to its definition, and from it the type.
 *   A command that turns a recorded request into a scrubbed fixture.
 *   A merged view of deferred responses, and the newer incremental delivery format.
 
 --------------------------------------------------------------------------------
+
+## Phase 0 results
+
+Recorded 2026-11-16 with a sample app on Apollo iOS 2.5.0 (code generated by apollo-ios-codegen
+2.5.0) and a local Apollo Server 5.5.2 with `graphql@17.0.0-alpha.2` for `@defer`. The recorded
+sessions and the 0.1.0 baseline are kept outside the repository.
+
+| Row | Outcome | What was recorded |
+|---|---|---|
+| 1 | 1, matches | Body `{"extensions":{"clientLibrary":{…},"persistedQuery":{"sha256Hash":"…","version":1}},"operationName":"Posts","variables":{…}}`. Headers: `Accept`, `Content-Type` only; no `X-APOLLO-OPERATION-TYPE`, no `apollographql-client-name` by default. Endpoint path `/`. |
+| 2 | 1, matches | HTTP 200, `{"errors":[{"message":"PersistedQueryNotFound","extensions":{"code":"PERSISTED_QUERY_NOT_FOUND"}}]}`, content type `application/graphql-response+json`. The retry carries hash and document and starts 0 to 7 ms after the miss arrives. Mutations retry by POST even with `useGETForPersistedQueryRetry`. W set to 2 s. |
+| 3 | 2, rule changed | `GET /?extensions={"clientLibrary":…}&operationName=Posts&query=…&variables=…` with `Apollo-Require-Preflight: true`, on path `/`. The URL carrier rule now also accepts a JSON-object `extensions` parameter. |
+| 4 | 2, rule refined | `multipart/mixed; boundary="-"; deferSpec=20220824`; body `\r\n---\r\n<part>\r\n---\r\n<part>\r\n-----\r\n`; each part has `content-type: application/json; charset=utf-8`; incremental items carry `label`. Delimiters now match whole lines, because the closing line `-----` starts with the delimiter `---`. 0.1.0 shows `✗ invalid JSON`. |
+| 5, 6 | not recorded (none needed) | Apollo sends the operation first and appends fragments; row 5 comes from other clients. |
+
+Other observations:
+
+*   Every Apollo iOS 2.5.0 request sends `Accept: multipart/mixed;deferSpec=20220824,application/graphql-response+json,application/json`.
+*   The recorder worked with Apollo iOS 2.x's streaming requests, and every request that depended
+    on an earlier response (each retry after a miss) was sent; the app received its data in all
+    five scenarios.
+*   Fixtures written from the recordings, in `cli/test/fixtures/`: `apq-miss-recorded`,
+    `apq-retry-recorded`, `apq-known-hash-recorded`, `get-query-recorded`,
+    `get-apq-retry-recorded`, `defer-recorded`.
+*   Baseline (0.1.0, largest session, 293 requests, median of 5): `list` 110 ms, `get` 99 ms.
+    `timeline` reads the simulator's live log, so its output is not repeatable and it ignores
+    `--session`; the baseline keeps only its network lines, for the newest session.
 
 ## Detailed Implementation Plan
 
@@ -526,9 +557,9 @@ cut after Phase 3; Phase 4 can follow in 0.2.x.
 **Baseline.** Choose one session recorded with 0.1.0 that has at least one `ok`, one `✗` and one
 REST request, and the largest session available. Copy each `.ndjson` file and its body directory
 into a directory `B/<bundle>/` outside the repository. With the 0.1.0 code and `SIMPEEK_DIR=B`,
-save the output of `list`, `ops`, `timeline --limit 200` and `get <n>` for three ids, all with
-`--bundle <bundle> --session <id>`. Time each of these commands five times on the largest session
-and keep the medians.
+save the output of `list`, `ops` and `get <n>` for three ids, all with
+`--bundle <bundle> --session <id>`, and the network lines of `timeline` for the newest session.
+Time `list` and `get` five times on the largest session and keep the medians.
 
 **Recordings.** Build the sample app and record it with `simpeek launch`:
 
@@ -655,9 +686,10 @@ adds `openSession` as a thin wrapper without the pass.
     shown as parts; select then starts at the part index, e.g. [1].incremental[0].data."
 
 **Phase 2 fixtures.** Request `post-json-named`; content type
-`multipart/mixed; boundary="graphql"; deferSpec=20220824` (provisional until Phase 0); each part has
-the header line `content-type: application/json; charset=utf-8`; CRLF line ends; part 1 is
-`{"data":{"posts":[]},"hasNext":true}` and the body ends with `--graphql--`, unless stated.
+`multipart/mixed; boundary="-"; deferSpec=20220824` (as recorded in Phase 0); the body starts with
+`\r\n---\r\n`; each part has the header line `content-type: application/json; charset=utf-8`;
+parts are separated by `\r\n---\r\n`; CRLF line ends; part 1 is
+`{"data":{"posts":[]},"hasNext":true}` and the body ends with `\r\n-----\r\n`, unless stated.
 
 | File (`.json`) | Response | → outcome |
 |---|---|---|
@@ -667,16 +699,17 @@ the header line `content-type: application/json; charset=utf-8`; CRLF line ends;
 | `defer-errors-object-in-part` | part 2 `{"errors":{"x":"y"},"hasNext":false}` | `partial`, `[null]`, parts 2 |
 | `defer-incremental-not-array` | part 2 `{"incremental":{"data":{}},"hasNext":false}` | `ok`, parts 2 |
 | `defer-cut-part` | part 2 is `{"incremental":[{"da`, no closing delimiter | `partial`, parts 1, incomplete |
-| `defer-cut-at-delimiter` | after part 1 only `\r\n--graphql\r\n` | `partial`, parts 1, incomplete |
-| `defer-has-next` | part 1 only, then `--graphql--` | `partial`, parts 1, incomplete |
+| `defer-cut-at-delimiter` | after part 1 only `\r\n---\r\n` | `partial`, parts 1, incomplete |
+| `defer-has-next` | part 1 only, then `\r\n-----\r\n` | `partial`, parts 1, incomplete |
 | `defer-truncated-flag` | `defer-ok` with `"_truncated": true` in `content` | `partial`, parts 2, incomplete |
 | `defer-null-part` | part 2 is `null` | `partial`, parts 1, incomplete |
 | `defer-empty-headers` | `defer-ok` with no header lines in either part | `ok`, parts 2 |
-| `defer-boundary-in-string` | one part `{"data":{"s":"a --graphql b"},"hasNext":false}` | `ok`, parts 1 |
+| `defer-boundary-in-string` | one part `{"data":{"s":"---"},"hasNext":false}` | `ok`, parts 1 |
+| `defer-other-boundary` | `defer-ok` with `boundary=graphql` (unquoted), delimiters `--graphql` and `--graphql--` | `ok`, parts 2 |
 | `defer-no-boundary` | content type `multipart/mixed`, body `{"errors":[{"message":"no","extensions":{"code":"FORBIDDEN"}}]}` | `errors`, `["FORBIDDEN"]` |
 | `mixed-unparseable` | two parts with the bodies `hello` and `world` | `invalid` |
 
-At least one of these must also exist with `source` from Phase 0 outcome 1 or 3.
+`defer-recorded` (Phase 0) is the recorded case.
 
 **`views.test.ts`, phase 2:** `defer-incremental-error`: `row` contains `⚠ partial: NOT_FOUND`,
 `detail()` contains `parts (2, trimmed):`, with `select: '[1].incremental[0].path'` it contains
@@ -773,6 +806,8 @@ written out in full):
 | `get-bad-variables` | GET `/graphql?query=%7Bviewer%7Bid%7D%7D&variables=not-json` | `query (anonymous)` |
 | `get-bad-extensions` | GET `/graphql?extensions=not-json` | `[]` |
 | `get-document-other-path` | GET `/v2/gateway?query=%7Bviewer%7Bid%7D%7D` | `null` |
+| `get-extensions-other-path` | GET `/?extensions=%7B%7D&query=%7Bviewer%7Bid%7D%7D` | `query (anonymous)` |
+| `get-rest-extensions-string` | GET `/search?query=%7Bshoes%7D&extensions=all` | `null` |
 | `get-rest-search` | GET `/api/items?query=shoes` | `null` |
 | `get-rest-braces` | GET `/search?query=%7Bshoes%7D` | `null` |
 | `post-empty-body-url-query` | POST `/graphql?query=%7Bviewer%7Bid%7D%7D`, `postData.text` `""` | `query (anonymous)` |
@@ -862,7 +897,7 @@ Text depends on which rows shipped. "Both" means both READMEs; the Chinese text 
     *   With `SIMPEEK_DIR=B` and `SIMPEEK_PROJECT` unset, run the Phase 0 baseline commands and
         `diff` them with the saved outputs. Every difference must be one of the intended changes in
         Goals.
-    *   With the same session, time `list`, `get` and `timeline` five times each. The median may
+    *   With the same session, time `list` and `get` five times each. The median may
         exceed the baseline median by at most 200 ms (a judgment: these commands run after every UI
         action in the agent loop). If exceeded, stop and revise this spec.
     *   The package check from `AGENTS.md`: `npm pack`, install into an empty directory,

@@ -1,0 +1,48 @@
+{
+  "source": "Phase 0 recording: Apollo iOS 2.5.0 sample app, Apollo Server 5.5.2",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/",
+    "headers": [
+      {
+        "name": "Accept",
+        "value": "multipart/mixed;deferSpec=20220824,application/graphql-response+json,application/json"
+      },
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "{\"extensions\":{\"clientLibrary\":{\"name\":\"apollo-ios\",\"version\":\"2.5.0\"}},\"operationName\":\"PostDetail\",\"query\":\"query PostDetail($id: ID!) { post(id: $id) { __typename id title ... on Post @defer(label: \\\"body\\\") { body } } }\",\"variables\":{\"id\":\"1\"}}"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content": {
+      "mimeType": "multipart/mixed; boundary=\"-\"; deferSpec=20220824",
+      "text": "\r\n---\r\ncontent-type: application/json; charset=utf-8\r\n\r\n{\"data\":{\"post\":{\"__typename\":\"Post\",\"id\":\"1\",\"title\":\"Edited\"}},\"hasNext\":true}\r\n---\r\ncontent-type: application/json; charset=utf-8\r\n\r\n{\"incremental\":[{\"data\":{\"body\":\"Body of Edited\"},\"path\":[\"post\"],\"label\":\"body\"}],\"hasNext\":false}\r\n-----\r\n"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "query",
+        "name": "PostDetail",
+        "hash": null,
+        "hasQuery": true,
+        "variables": {
+          "id": "1"
+        }
+      }
+    ],
+    "outcome": {
+      "status": "ok",
+      "codes": [],
+      "parts": 2,
+      "incomplete": false
+    }
+  }
+}

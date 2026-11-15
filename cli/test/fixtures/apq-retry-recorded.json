@@ -1,0 +1,48 @@
+{
+  "source": "Phase 0 recording: Apollo iOS 2.5.0 sample app, Apollo Server 5.5.2",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/",
+    "headers": [
+      {
+        "name": "Accept",
+        "value": "multipart/mixed;deferSpec=20220824,application/graphql-response+json,application/json"
+      },
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "{\"extensions\":{\"clientLibrary\":{\"name\":\"apollo-ios\",\"version\":\"2.5.0\"},\"persistedQuery\":{\"sha256Hash\":\"8400f07b288346fc0342666821149156e4ab3066c6f90aa455591d551ed56326\",\"version\":1}},\"operationName\":\"Posts\",\"query\":\"query Posts($first: Int) { posts(first: $first) { __typename id title } }\",\"variables\":{\"first\":2}}"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content": {
+      "mimeType": "application/graphql-response+json; charset=utf-8",
+      "text": "{\"data\":{\"posts\":[{\"__typename\":\"Post\",\"id\":\"1\",\"title\":\"Edited\"},{\"__typename\":\"Post\",\"id\":\"2\",\"title\":\"Post 2\"}]}}\n"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "query",
+        "name": "Posts",
+        "hash": "8400f07b288346fc0342666821149156e4ab3066c6f90aa455591d551ed56326",
+        "hasQuery": true,
+        "variables": {
+          "first": 2
+        }
+      }
+    ],
+    "outcome": {
+      "status": "ok",
+      "codes": [],
+      "parts": null,
+      "incomplete": false
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "source": "Phase 0 recording: Apollo iOS 2.5.0 sample app, Apollo Server 5.5.2",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/?extensions=%7B%22clientLibrary%22:%7B%22name%22:%22apollo-ios%22,%22version%22:%222.5.0%22%7D%7D&operationName=Posts&query=query%20Posts($first:%20Int)%20%7B%20posts(first:%20$first)%20%7B%20__typename%20id%20title%20%7D%20%7D&variables=%7B%22first%22:2%7D",
+    "headers": [
+      {
+        "value": "multipart/mixed;deferSpec=20220824,application/graphql-response+json,application/json",
+        "name": "Accept"
+      },
+      {
+        "value": "true",
+        "name": "Apollo-Require-Preflight"
+      },
+      {
+        "value": "application/json",
+        "name": "Content-Type"
+      }
+    ],
+    "queryString": [
+      {
+        "name": "extensions",
+        "value": "{\"clientLibrary\":{\"name\":\"apollo-ios\",\"version\":\"2.5.0\"}}"
+      },
+      {
+        "value": "Posts",
+        "name": "operationName"
+      },
+      {
+        "name": "query",
+        "value": "query Posts($first: Int) { posts(first: $first) { __typename id title } }"
+      },
+      {
+        "name": "variables",
+        "value": "{\"first\":2}"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content": {
+      "mimeType": "application/graphql-response+json; charset=utf-8",
+      "text": "{\"data\":{\"posts\":[{\"__typename\":\"Post\",\"id\":\"1\",\"title\":\"Edited\"},{\"__typename\":\"Post\",\"id\":\"2\",\"title\":\"Post 2\"}]}}\n"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "query",
+        "name": "Posts",
+        "hash": null,
+        "hasQuery": true,
+        "variables": {
+          "first": 2
+        }
+      }
+    ],
+    "outcome": {
+      "status": "ok",
+      "codes": [],
+      "parts": null,
+      "incomplete": false
+    }
+  }
+}
