@@ -156,14 +156,19 @@ export function loadSession(info: SessionInfo): SessionReader {
 }
 
 /** Full text of a body, reading the side file when the body was too large to inline. */
-export function bodyText(info: SessionInfo, body?: Body): string | undefined {
+/**
+ * A body as text. A side file that is not valid UTF-8 becomes a `<binary …>` placeholder, unless
+ * `lossy` is set: then invalid bytes are replaced with U+FFFD, so that a body cut inside a
+ * character can still be parsed.
+ */
+export function bodyText(info: SessionInfo, body?: Body, opts: { lossy?: boolean } = {}): string | undefined {
   if (!body) return undefined;
   if (body.text !== undefined) return body.text;
   if (body._file) {
     try {
       const buf = fs.readFileSync(path.join(ROOT, info.bundle, body._file));
       const text = buf.toString('utf8');
-      return text.includes('�') ? `<binary ${buf.length} bytes: ${path.join(ROOT, info.bundle, body._file)}>` : text;
+      return text.includes('\uFFFD') && !opts.lossy ? `<binary ${buf.length} bytes: ${path.join(ROOT, info.bundle, body._file)}>` : text;
     } catch {
       return undefined;
     }

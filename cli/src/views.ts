@@ -1,5 +1,5 @@
 // Text views shared by the CLI and the MCP server: one-line rows, filters, details, per-operation stats.
-import { outcome, parseOperations, typeLetter, type GqlOutcome, type Operation } from './graphql.ts';
+import { outcome, recognize, typeLetter, type GqlOutcome, type Operation } from './graphql.ts';
 import { findOperation } from './sourcemap.ts';
 import { bodyText, findMark, readConfig, type Entry, type Header, type SessionInfo } from './store.ts';
 
@@ -26,6 +26,8 @@ export type View = {
   label: string; // "M UpdatePost" or "POST host/path"
   state: string; // ok / 401 / ✗ FORBIDDEN @path / pending …
   failed: boolean;
+  /** Message of an exception thrown while recognizing the request or reading its outcome. */
+  recognitionError?: string;
 };
 
 const views = new WeakMap<Entry, View>();
@@ -33,8 +35,17 @@ const views = new WeakMap<Entry, View>();
 export function view(e: Entry, info: SessionInfo): View {
   const cached = views.get(e);
   if (cached && (!e.done || cached.state !== '…')) return cached;
-  const ops = parseOperations(e, bodyText(info, e.request.postData));
-  const gql = ops && e.done ? outcome(bodyText(info, e.response?.content)) : undefined;
+  let ops: Operation[] | undefined;
+  let gql: GqlOutcome | undefined;
+  let recognitionError: string | undefined;
+  try {
+    ops = recognize(e.request, bodyText(info, e.request.postData));
+    gql = ops && e.done ? outcome(e.response, bodyText(info, e.response?.content, { lossy: true }), ops) : undefined;
+  } catch (err) {
+    ops = undefined;
+    gql = undefined;
+    recognitionError = String((err as Error)?.message ?? err);
+  }
   const label = ops?.length
     ? `${typeLetter(ops[0].type)} ${ops.map((o) => o.name).join('+')}`
     : `${e.request.method} ${shortUrl(e.request.url)}`;
@@ -45,6 +56,7 @@ export function view(e: Entry, info: SessionInfo): View {
   if (!e.done) state = '…';
   else if (e.error) { state = `✗ ${e.error.message}`; failed = true; }
   else if (status !== undefined && status >= 400) { state = `✗ ${status}`; failed = true; }
+  else if (recognitionError !== undefined) { state = '✗ recognition failed'; failed = true; }
   else if (gql && gql.status !== 'ok') {
     const first = gql.errors[0];
     const what = first ? [first.code, first.path ? `@${first.path}` : ''].filter(Boolean).join(' ') || trunc(first.message, 60) : 'invalid JSON';
@@ -56,7 +68,7 @@ export function view(e: Entry, info: SessionInfo): View {
     failed = true;
   } else state = ops ? 'ok' : String(status ?? '');
 
-  const v = { ops, gql, label, state, failed };
+  const v: View = { ops, gql, label, state, failed, recognitionError };
   views.set(e, v);
   return v;
 }
@@ -161,6 +173,7 @@ export function detail(e: Entry, info: SessionInfo, o: DetailOptions = {}): stri
   };
   const out: string[] = [];
   out.push(`#${e.id}  ${v.label}  ${v.state}  ${e.done ? `${e.time}ms` : '(in flight)'}`);
+  if (v.recognitionError !== undefined) out.push(`recognition failed: ${trunc(v.recognitionError, 100)}`);
   out.push(`${e.request.method} ${e.request.url}`);
   const meta = [`started ${clock(e.startMs)}`, `session ${info.session}`];
   if (e.response) meta.push(`http ${e.response.status}${e.response.httpVersion ? ' ' + e.response.httpVersion : ''}`, human(e.response.content.size ?? 0));
@@ -192,7 +205,10 @@ export function detail(e: Entry, info: SessionInfo, o: DetailOptions = {}): stri
       else out.push('', `query${tag}: ${op.query.trim().split('\n').length} lines (pass query=true to show)`);
     });
   } else if (e.request.postData) {
-    out.push('', 'request body:', bodyBlock(bodyText(info, e.request.postData), shape, doRedact));
+    let reqText: string | undefined;
+    let readable = true;
+    try { reqText = bodyText(info, e.request.postData); } catch { readable = false; }
+    out.push('', readable ? `request body:\n${bodyBlock(reqText, shape, doRedact)}` : 'request body: (unreadable)');
   }
 
   const resText = bodyText(info, e.response?.content);

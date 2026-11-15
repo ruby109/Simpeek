@@ -1,5 +1,5 @@
 // GraphQL awareness: operation names from the request body, outcome from the response `errors`.
-import type { Entry } from './store.ts';
+import type { Request, Response } from './store.ts';
 
 export type OpType = 'query' | 'mutation' | 'subscription';
 export type Operation = { type: OpType; name: string; query: string; variables?: unknown };
@@ -8,11 +8,13 @@ export type GqlOutcome = { status: 'ok' | 'errors' | 'partial' | 'invalid'; erro
 
 const GRAPHQL_PATH = /\/graphql\/?$/i;
 
-/** Operations carried by a request, or undefined when it is not GraphQL. Handles batched arrays. */
-export function parseOperations(entry: Entry, bodyText?: string): Operation[] | undefined {
-  const text = bodyText ?? entry.request.postData?.text;
+/**
+ * Operations carried by a request, or undefined when it is not GraphQL. Handles batched arrays.
+ * `text` is the request body as text.
+ */
+export function recognize(request: Request, text: string | undefined): Operation[] | undefined {
   let pathname = '';
-  try { pathname = new URL(entry.request.url).pathname; } catch { /* keep empty */ }
+  try { pathname = new URL(request.url).pathname; } catch { /* keep empty */ }
   if (!text) return GRAPHQL_PATH.test(pathname) ? [] : undefined;
 
   let body: unknown;
@@ -36,25 +38,40 @@ function parseHead(query: string, operationName?: string): { type: OpType; name:
   return { type, name: operationName || m?.[2] || '(anonymous)' };
 }
 
-export function outcome(responseText?: string): GqlOutcome | undefined {
-  if (responseText === undefined) return undefined;
+/**
+ * Outcome of a GraphQL response. `text` is the response body as text; `ops` are the request's
+ * operations.
+ */
+export function outcome(
+  response: Pick<Response, 'status' | 'content'> | undefined, text: string | undefined, ops: Operation[],
+): GqlOutcome | undefined {
+  void response; void ops; // used by the multipart and persisted-query rules
+  if (text === undefined) return undefined;
   let body: any;
-  try { body = JSON.parse(responseText); } catch { return { status: 'invalid', errors: [] }; }
+  try { body = JSON.parse(text); } catch { return { status: 'invalid', errors: [] }; }
   const results = Array.isArray(body) ? body : [body];
   const errors: GqlError[] = [];
   let hasData = false;
   for (const r of results) {
     if (r && r.data != null) hasData = true;
-    for (const e of (r?.errors ?? []) as any[]) {
-      errors.push({
-        message: String(e?.message ?? ''),
-        path: Array.isArray(e?.path) ? e.path.join('.') : undefined,
-        code: e?.extensions?.code ?? e?.extensions?.errorCode ?? e?.code,
-      });
-    }
+    errors.push(...collectErrors(r?.errors));
   }
   if (errors.length === 0) return { status: 'ok', errors };
   return { status: hasData ? 'partial' : 'errors', errors };
+}
+
+/**
+ * Errors of an `errors` value. A value that is neither absent, null nor an array counts as one
+ * error whose message is the value as JSON.
+ */
+function collectErrors(value: unknown): GqlError[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) return [{ message: (JSON.stringify(value) ?? '').slice(0, 200) }];
+  return value.map((e: any) => ({
+    message: String(e?.message ?? ''),
+    path: Array.isArray(e?.path) ? e.path.join('.') : undefined,
+    code: e?.extensions?.code ?? e?.extensions?.errorCode ?? e?.code,
+  }));
 }
 
 export const typeLetter = (t: OpType) => (t === 'mutation' ? 'M' : t === 'subscription' ? 'S' : 'Q');
