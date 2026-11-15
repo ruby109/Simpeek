@@ -103,6 +103,15 @@ Distribution:
 - [ ] Homebrew tap.
 - [ ] `Package.swift` at the repository root, so that apps can add the SimPeek package by URL.
 
+Capture and storage:
+
+- [ ] Record without relaunching through simpeek: set `DYLD_INSERT_LIBRARIES` on the simulator's `launchd`, so that every app started afterwards is recorded from its first request (including extensions), with an explicit on/off switch and cleanup, since it affects the whole simulator.
+- [ ] HAR export (`simpeek har -o file.har`), so that a recorded session can be opened in Charles, Proxyman or browser developer tools.
+- [ ] Size limits per session (total bytes, and bytes per body), in addition to keeping the newest 20 launches.
+- [ ] Review the redaction rules against a wider list of secret header names (`X-CSRFToken`, `x-apitoken`, `oidc`/`jwt`/`assertion` prefixes, `x-firebase-appcheck`, `x-amz-content-sha256`), and check for false matches such as `keep-alive` and `:authority`.
+- [ ] Document what redaction covers and what it does not (secrets in URL paths, values under unlisted names), so that users know when output is safe to share.
+- [ ] Leftovers after a crash: confirm that readers tolerate a truncated last line when the app is killed, and remove body directories whose session file is gone.
+
 GraphQL (Apollo iOS and other clients):
 
 - [ ] Persisted queries / APQ: requests without `query` (only `operationName` and `extensions.persistedQuery`) are not recognized, and the expected first `PersistedQueryNotFound` response is shown as a failure.

@@ -102,6 +102,15 @@ MCP 工具：`net_launch`、`net_sessions`、`net_list`（用 `cursor` 只取新
 - [ ] Homebrew tap。
 - [ ] 在仓库根目录放 `Package.swift`，让 app 可以通过 URL 添加 SimPeek 包。
 
+抓取与存储：
+
+- [ ] 不经 simpeek 重启也能录：把 `DYLD_INSERT_LIBRARIES` 设在模拟器的 `launchd` 上，之后启动的所有 app（包括扩展）从第一个请求起就被记录；因为影响整台模拟器，需要明确的开关和清理。
+- [ ] 导出 HAR（`simpeek har -o file.har`），让录下来的会话能直接在 Charles、Proxyman 或浏览器开发者工具里打开。
+- [ ] 单个会话的体积上限（总字节数、单个 body 的字节数），作为“保留最近 20 次启动”之外的限制。
+- [ ] 对照一份更全的敏感 header 名单检查脱敏规则（`X-CSRFToken`、`x-apitoken`、`oidc`/`jwt`/`assertion` 前缀、`x-firebase-appcheck`、`x-amz-content-sha256`），同时检查 `keep-alive`、`:authority` 这类误伤。
+- [ ] 在文档里写清楚脱敏覆盖什么、不覆盖什么（URL 路径里的秘密、名单之外的字段值），让用户知道什么时候输出可以直接分享。
+- [ ] 崩溃后的残留：确认 app 被杀时读取端能容忍不完整的最后一行，并清理 session 文件已不存在的 body 目录。
+
 GraphQL（Apollo iOS 及其他客户端）：
 
 - [ ] Persisted queries / APQ：不带 `query` 的请求（只有 `operationName` 和 `extensions.persistedQuery`）无法识别，而且预期内的第一次 `PersistedQueryNotFound` 响应会被显示为失败。
