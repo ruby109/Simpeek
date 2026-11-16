@@ -1,6 +1,6 @@
 {
   "name": "simpeek",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Stream, query and inspect iOS Simulator network traffic (GraphQL-aware) from the CLI or MCP.",
   "type": "module",
   "bin": {

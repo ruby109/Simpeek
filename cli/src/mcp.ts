@@ -29,7 +29,7 @@ const filters = {
 };
 
 export async function serve() {
-  const server = new McpServer({ name: 'simpeek', version: '0.1.0' });
+  const server = new McpServer({ name: 'simpeek', version: '0.2.0' });
 
   server.registerTool('net_launch', {
     description: 'Relaunch an app on the iOS Simulator with network recording on (and stdout/stderr captured for log_read). Run this before reproducing a bug.',
