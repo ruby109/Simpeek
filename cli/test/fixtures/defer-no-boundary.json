@@ -1,0 +1,46 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/api/graphql",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "{\"query\":\"query Posts($first:Int){posts(first:$first){id}}\",\"variables\":{\"first\":20}}"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content": {
+      "mimeType": "multipart/mixed",
+      "text": "{\"errors\":[{\"message\":\"no\",\"extensions\":{\"code\":\"FORBIDDEN\"}}]}"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "query",
+        "name": "Posts",
+        "hash": null,
+        "hasQuery": true,
+        "variables": {
+          "first": 20
+        }
+      }
+    ],
+    "outcome": {
+      "status": "errors",
+      "codes": [
+        "FORBIDDEN"
+      ],
+      "parts": null,
+      "incomplete": false
+    }
+  }
+}

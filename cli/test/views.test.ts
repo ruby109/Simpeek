@@ -31,3 +31,28 @@ test('a response whose errors is an object is a failure', () => {
   const e = entry(2, { mimeType: 'application/json', text: '{"query":"query Posts{posts{id}}"}' }, '{"errors":{"field":"msg"}}');
   assert.match(row(e, info), /Q Posts\s+✗/);
 });
+
+const CT = 'multipart/mixed; boundary="-"; deferSpec=20220824';
+const part = (json: string) => `---\r\ncontent-type: application/json; charset=utf-8\r\n\r\n${json}\r\n`;
+const query = { mimeType: 'application/json', text: '{"query":"query Posts{posts{id}}"}' };
+
+function deferred(id: number, text: string): Entry {
+  const e = entry(id, query, text);
+  e.response!.content.mimeType = CT;
+  return e;
+}
+
+test('a deferred response with an error in a later part', () => {
+  const e = deferred(3, '\r\n' + part('{"data":{"posts":[]},"hasNext":true}')
+    + part('{"incremental":[{"errors":[{"message":"x","extensions":{"code":"NOT_FOUND"}}],"path":["posts"]}],"hasNext":false}')
+    + '-----\r\n');
+  assert.match(row(e, info), /⚠ partial: NOT_FOUND/);
+  assert.match(detail(e, info), /parts \(2, trimmed\):/);
+  assert.match(detail(e, info, { select: '[1].incremental[0].path' }), /posts/);
+});
+
+test('a deferred response that is cut off', () => {
+  const e = deferred(4, '\r\n' + part('{"data":{"posts":[]},"hasNext":true}') + '---\r\ncontent-type: application/json\r\n\r\n{"incremental":[{"da');
+  assert.match(row(e, info), /⚠ partial: incomplete response/);
+  assert.match(detail(e, info), /\(incomplete response\)/);
+});

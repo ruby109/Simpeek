@@ -1,6 +1,5 @@
 {
   "source": "Phase 0 recording: Apollo iOS 2.5.0 sample app, Apollo Server 5.5.2",
-  "todo": "phase 2",
   "request": {
     "method": "POST",
     "url": "https://api.example.com/",

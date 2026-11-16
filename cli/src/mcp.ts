@@ -85,7 +85,7 @@ export async function serve() {
   });
 
   server.registerTool('net_get', {
-    description: 'Details of one request. GraphQL: errors first, then variables, then trimmed data, plus the source file defining the operation. Bodies are trimmed (arrays to 3 items) and secrets redacted unless raw/redact=false.',
+    description: 'Details of one request. GraphQL: errors first, then variables, then trimmed data, plus the source file defining the operation. Bodies are trimmed (arrays to 3 items) and secrets redacted unless raw/redact=false. Deferred (multipart) responses are shown as parts; select then starts at the part index, e.g. [1].incremental[0].data.',
     inputSchema: {
       ...target,
       id: z.number(),

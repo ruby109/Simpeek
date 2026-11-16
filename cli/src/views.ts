@@ -59,7 +59,9 @@ export function view(e: Entry, info: SessionInfo): View {
   else if (recognitionError !== undefined) { state = '✗ recognition failed'; failed = true; }
   else if (gql && gql.status !== 'ok') {
     const first = gql.errors[0];
-    const what = first ? [first.code, first.path ? `@${first.path}` : ''].filter(Boolean).join(' ') || trunc(first.message, 60) : 'invalid JSON';
+    const what = first
+      ? [first.code, first.path ? `@${first.path}` : ''].filter(Boolean).join(' ') || trunc(first.message, 60)
+      : gql.incomplete ? 'incomplete response' : 'invalid JSON';
     state = gql.status === 'partial' ? `⚠ partial: ${what}` : `✗ ${what}`;
     if (gql.errors.length > 1) {
       const same = gql.errors.every((x) => x.code === first.code && x.message === first.message);
@@ -212,7 +214,16 @@ export function detail(e: Entry, info: SessionInfo, o: DetailOptions = {}): stri
   }
 
   const resText = bodyText(info, e.response?.content);
-  if (resText !== undefined) {
+  const parts = v.gql?.parts;
+  if (parts) {
+    if (o.select) out.push('', `response ${o.select}:`, shape(pick(parts, o.select)));
+    else {
+      out.push('', o.raw ? `parts (${parts.length}):` : `parts (${parts.length}, trimmed):`);
+      parts.forEach((part, i) => out.push(...(i ? [''] : []), shape(part)));
+    }
+    if (v.gql?.incomplete && !e.response?.content._truncated) out.push('(incomplete response)');
+    if (e.response?.content._truncated) out.push('(response body capped at 10MB)');
+  } else if (resText !== undefined) {
     let parsed: unknown;
     try { parsed = JSON.parse(resText); } catch { parsed = undefined; }
     if (o.select && parsed !== undefined) {
