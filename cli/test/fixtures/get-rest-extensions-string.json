@@ -1,0 +1,13 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/search?query=%7Bshoes%7D&extensions=all",
+    "headers": [],
+    "queryString": []
+  },
+  "expect": {
+    "ops": null,
+    "outcome": null
+  }
+}

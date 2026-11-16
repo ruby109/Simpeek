@@ -1,0 +1,23 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?query=query%20Posts%28%24first%3AInt%29%7Bposts%28first%3A%24first%29%7Bid%7D%7D&variables=%7B%22first%22%3A20%7D",
+    "headers": [],
+    "queryString": []
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "query",
+        "name": "Posts",
+        "hash": null,
+        "hasQuery": true,
+        "variables": {
+          "first": 20
+        }
+      }
+    ],
+    "outcome": null
+  }
+}

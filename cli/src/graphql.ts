@@ -21,23 +21,59 @@ const GRAPHQL_PATH = /\/graphql\/?$/i;
 
 /**
  * Operations carried by a request, or undefined when it is not GraphQL. Handles batched arrays.
- * `text` is the request body as text.
+ * `text` is the request body as text. A request with a body is read from the body (JSON); one
+ * without, from its URL parameters (GET).
  */
 export function recognize(request: Request, text: string | undefined): Operation[] | undefined {
-  let pathname = '';
-  try { pathname = new URL(request.url).pathname; } catch { /* keep empty */ }
-  if (!text) return GRAPHQL_PATH.test(pathname) ? [] : undefined;
+  let url: URL | undefined;
+  try { url = new URL(request.url); } catch { /* not a URL */ }
+  const graphqlPath = GRAPHQL_PATH.test(url?.pathname ?? '');
 
-  let body: unknown;
-  try { body = JSON.parse(text); } catch { return GRAPHQL_PATH.test(pathname) ? [] : undefined; }
-  const items = (Array.isArray(body) ? body : [body]).map(operationItem).filter((x) => x !== undefined);
+  let raw: unknown[] = [];
+  if (text) {
+    try {
+      const body: unknown = JSON.parse(text);
+      raw = Array.isArray(body) ? body : [body];
+    } catch { /* not JSON: no operations */ }
+  } else if (url) {
+    raw = urlItems(url, graphqlPath);
+  }
+
+  const items = raw.map(operationItem).filter((x) => x !== undefined);
   const headerType = items.length === 1 ? typeFromHeader(request) : undefined;
   const ops: Operation[] = items.map(({ query, variables, operationName, hash }) => {
-    if (query !== undefined) return { ...parseHead(query, operationName), query, variables, ...(hash ? { hash } : {}) };
+    if (query !== undefined) return { ...documentHead(query, operationName), query, variables, ...(hash ? { hash } : {}) };
     return { ...(headerType ? { type: headerType } : {}), name: operationName ?? '(anonymous)', variables, hash };
   });
-  if (ops.length === 0 && !GRAPHQL_PATH.test(pathname)) return undefined;
+  if (ops.length === 0 && !graphqlPath) return undefined;
   return ops;
+}
+
+/**
+ * The operation in the URL parameters of a request without a body (GraphQL over HTTP GET). Used on
+ * a `/graphql` path, or when `extensions` is a JSON object: Apollo iOS 2.x sends one with every
+ * request, and Apollo Server's default path is `/`. A REST `query` parameter alone is not enough.
+ */
+function urlItems(url: URL, graphqlPath: boolean): unknown[] {
+  const p = url.searchParams;
+  const json = (v: string | null): unknown => {
+    if (v === null) return undefined;
+    try { return JSON.parse(v); } catch { return undefined; }
+  };
+  const extensions = json(p.get('extensions'));
+  const extensionsObject = extensions !== null && typeof extensions === 'object' && !Array.isArray(extensions);
+  if (!graphqlPath && !extensionsObject) return [];
+  return [{
+    query: p.get('query') ?? undefined,
+    operationName: p.get('operationName') ?? undefined,
+    variables: json(p.get('variables')),
+    extensions,
+  }];
+}
+
+/** True when the request's operations were read from its URL (so the URL repeats the variables). */
+export function fromUrl(text: string | undefined, ops: Operation[] | undefined): boolean {
+  return !!ops?.length && !text;
 }
 
 type Item = { query?: string; variables?: unknown; operationName?: string; hash?: string };
@@ -61,11 +97,83 @@ function typeFromHeader(request: Request): OpType | undefined {
   return v === 'query' || v === 'mutation' || v === 'subscription' ? v : undefined;
 }
 
-function parseHead(query: string, operationName?: string): { type: OpType; name: string } {
-  const stripped = query.replace(/#[^\n]*/g, '');
-  const m = stripped.match(/^\s*(query|mutation|subscription)\b\s*([_A-Za-z][_0-9A-Za-z]*)?/);
-  const type = (m?.[1] as OpType) ?? 'query';
-  return { type, name: operationName || m?.[2] || '(anonymous)' };
+/**
+ * Type and name of the operation a document runs: the one named `operationName`, else the first.
+ * A document in which no operation is found counts as a query, as in 0.1.0.
+ */
+function documentHead(query: string, operationName?: string): { type: OpType; name: string } {
+  const defs = scanDocument(query);
+  const selected = (operationName ? defs.find((d) => d.name === operationName) : undefined) ?? defs[0];
+  return { type: selected?.type ?? 'query', name: operationName ?? selected?.name ?? '(anonymous)' };
+}
+
+const WORD_START = /[_A-Za-z]/;
+const WORD = /[_0-9A-Za-z]/;
+
+/**
+ * The operations defined at the top level of a GraphQL document, in order. Not a parser: it skips
+ * strings, block strings, comments and anything in parentheses or brackets, and classifies each
+ * top-level definition by its first word. A definition ends at the brace that closes its first `{`.
+ * Never throws; unterminated input ends the scan with what was found.
+ */
+export function scanDocument(doc: string): { type: OpType; name?: string }[] {
+  const out: { type: OpType; name?: string }[] = [];
+  const n = doc.length;
+  let i = 0;
+  let inDefinition = false;
+  let depth = 0; // brace depth inside the current definition
+  let nesting = 0; // parentheses and brackets
+  const wordEnd = (from: number) => { let j = from; while (j < n && WORD.test(doc[j])) j++; return j; };
+
+  while (i < n) {
+    const c = doc[i];
+    if (c === '"') { // strings first: they may contain any of the characters below
+      if (doc.startsWith('"""', i)) { const j = doc.indexOf('"""', i + 3); i = j < 0 ? n : j + 3; continue; }
+      i++;
+      while (i < n && doc[i] !== '"' && doc[i] !== '\n') i += doc[i] === '\\' ? 2 : 1;
+      i++;
+      continue;
+    }
+    if (c === '#') { const j = doc.indexOf('\n', i); i = j < 0 ? n : j + 1; continue; }
+    if (c === '(' || c === '[') { nesting++; i++; continue; }
+    if (c === ')' || c === ']') { if (nesting) nesting--; i++; continue; }
+    if (nesting) { i++; continue; }
+
+    if (inDefinition) {
+      if (c === '{') depth++;
+      else if (c === '}' && depth > 0 && --depth === 0) inDefinition = false;
+      i++;
+      continue;
+    }
+    if (c === '{') { // a bare selection set is an anonymous query
+      out.push({ type: 'query' });
+      inDefinition = true;
+      depth = 1;
+      i++;
+      continue;
+    }
+    if (WORD_START.test(c)) {
+      const end = wordEnd(i);
+      const word = doc.slice(i, end);
+      inDefinition = true;
+      depth = 0;
+      i = end;
+      if (word === 'query' || word === 'mutation' || word === 'subscription') {
+        let k = i;
+        while (k < n && /\s/.test(doc[k])) k++;
+        if (k < n && WORD_START.test(doc[k])) {
+          const nameEnd = wordEnd(k);
+          out.push({ type: word, name: doc.slice(k, nameEnd) });
+          i = nameEnd;
+        } else {
+          out.push({ type: word });
+        }
+      }
+      continue;
+    }
+    i++; // anything else outside a definition is ignored
+  }
+  return out;
 }
 
 /**

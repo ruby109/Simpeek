@@ -1,0 +1,13 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?extensions=not-json",
+    "headers": [],
+    "queryString": []
+  },
+  "expect": {
+    "ops": [],
+    "outcome": null
+  }
+}

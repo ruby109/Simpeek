@@ -214,3 +214,31 @@ test('a batch miss is retried only when every hash is', () => {
   const both = sessionFile([batchMiss, { body: [withDoc(H1), withDoc(H2)], start: 1.01, end: 1.1 }, later]);
   assert.equal(both.s.missState(both.s.all()[0]), 'retried');
 });
+
+// ---------- phase 4: GET and fragment-first documents ----------
+
+test('a GET operation does not print its variables in the URL line', () => {
+  const url = 'https://api.example.com/graphql?query=' + encodeURIComponent('query Me($token: String){me(token:$token){id}}')
+    + '&variables=' + encodeURIComponent('{"token":"s3cret"}');
+  const e: Entry = { ...entry(5, undefined, '{"data":{"me":null}}'), request: { method: 'GET', url, headers: [], queryString: [] } };
+  const d = detail(e, memory(e));
+  assert.doesNotMatch(d, /s3cret/);
+  assert.match(d.split('\n')[1], /^GET https:\/\/api\.example\.com\/graphql\?…$/);
+});
+
+test('a fragment-first mutation on an unusual path', () => {
+  const doc = 'fragment PostFields on Post { id } mutation UpdatePost($id: ID!) { updatePost(id: $id) { ...PostFields } }';
+  const e = entry(6, { mimeType: 'application/json', text: JSON.stringify({ query: doc }) }, '{"errors":[{"message":"no","extensions":{"code":"FORBIDDEN"}}]}');
+  e.request.url = 'https://api.example.com/v2/gateway';
+  assert.match(row(e, memory(e)), /M UpdatePost\s+✗ FORBIDDEN/);
+});
+
+test('a miss whose retry goes by GET is retried', () => {
+  const getRetry = 'https://api.example.com/?operationName=Posts&query=' + encodeURIComponent('query Posts { posts { id } }')
+    + '&extensions=' + encodeURIComponent(JSON.stringify(pq(H1)));
+  const { s, file } = sessionFile([miss()]);
+  fs.appendFileSync(file, JSON.stringify({ _type: 'start', _id: 2, startedDateTime: new Date(T0 + 1001).toISOString(),
+    request: { method: 'GET', url: getRetry, headers: [], queryString: [] } }) + '\n');
+  s.poll();
+  assert.equal(s.missState(s.all()[0]), 'retried');
+});

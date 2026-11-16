@@ -1,0 +1,30 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/api/graphql",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "{\"query\": \"fragment PostFields on Post { id } mutation UpdatePost($id: ID!) { updatePost(id: $id) { ...PostFields } }\", \"operationName\": \"UpdatePost\"}"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "mutation",
+        "name": "UpdatePost",
+        "hash": null,
+        "hasQuery": true,
+        "variables": null
+      }
+    ],
+    "outcome": null
+  }
+}

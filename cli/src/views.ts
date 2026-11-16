@@ -1,5 +1,5 @@
 // Text views shared by the CLI and the MCP server: one-line rows, filters, details, per-operation stats.
-import { outcome, recognize, typeLetter, type GqlOutcome, type Operation, type OpType } from './graphql.ts';
+import { fromUrl, outcome, recognize, typeLetter, type GqlOutcome, type Operation, type OpType } from './graphql.ts';
 import { findOperation } from './sourcemap.ts';
 import { bodyText, findMark, listSessions, loadSession, readConfig, type Entry, type Header, type Line, type SessionInfo } from './store.ts';
 
@@ -28,6 +28,8 @@ export type View = {
   failed: boolean;
   /** Message of an exception thrown while recognizing the request or reading its outcome. */
   recognitionError?: string;
+  /** The operations were read from the URL, so its query string repeats the variables. */
+  fromUrl?: boolean;
 };
 
 /**
@@ -43,7 +45,9 @@ export type MissState = 'retried' | 'pending' | 'abandoned';
 /** Where a session's entries come from: a SessionReader, or entries built in memory (tests). */
 export type EntrySource = { entries: Map<number, Entry>; all(): Entry[]; poll?(): Line[] };
 
-type Recognition = { done: boolean; ops?: Operation[]; gql?: GqlOutcome; outcomeRead?: boolean; error?: string };
+type Recognition = {
+  done: boolean; ops?: Operation[]; fromUrl?: boolean; gql?: GqlOutcome; outcomeRead?: boolean; error?: string;
+};
 
 /**
  * The entries of one session plus what needs the whole session to know: types learned from other
@@ -106,7 +110,7 @@ export class Session {
       failed = true;
     } else state = ops ? 'ok' : String(status ?? '');
 
-    return { ops, gql, label, state, failed, recognitionError: r.error };
+    return { ops, gql, label, state, failed, recognitionError: r.error, fromUrl: r.fromUrl };
   }
 
   /** Operations are read once per entry (again when it finishes); the outcome only when needed. */
@@ -114,7 +118,13 @@ export class Session {
     let r = this.recognitions.get(e);
     if (!r || r.done !== e.done) {
       r = { done: e.done };
-      try { r.ops = recognize(e.request, bodyText(this.info, e.request.postData)); } catch (err) { r.error = message(err); }
+      try {
+        const text = bodyText(this.info, e.request.postData);
+        r.ops = recognize(e.request, text);
+        r.fromUrl = fromUrl(text, r.ops);
+      } catch (err) {
+        r.error = message(err);
+      }
       this.recognitions.set(e, r);
     }
     if (withOutcome && !r.outcomeRead && r.ops && e.done && r.error === undefined) {
@@ -296,7 +306,9 @@ export function detail(e: Entry, s: Session, o: DetailOptions = {}): string {
   const out: string[] = [];
   out.push(`#${e.id}  ${v.label}  ${v.state}  ${e.done ? `${e.time}ms` : '(in flight)'}`);
   if (v.recognitionError !== undefined) out.push(`recognition failed: ${trunc(v.recognitionError, 100)}`);
-  out.push(`${e.request.method} ${e.request.url}`);
+  const q = e.request.url.indexOf('?');
+  // A GET operation's query string holds the document and the unredacted variables, shown below.
+  out.push(`${e.request.method} ${v.fromUrl && q >= 0 ? `${e.request.url.slice(0, q)}?…` : e.request.url}`);
   const meta = [`started ${clock(e.startMs)}`, `session ${info.session}`];
   if (e.response) meta.push(`http ${e.response.status}${e.response.httpVersion ? ' ' + e.response.httpVersion : ''}`, human(e.response.content.size ?? 0));
   out.push(meta.join('  '));

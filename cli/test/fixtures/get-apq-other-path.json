@@ -1,0 +1,21 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/v2/gateway?operationName=Posts&extensions=%7B%22persistedQuery%22%3A%7B%22version%22%3A1%2C%22sha256Hash%22%3A%22ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890%22%7D%7D",
+    "headers": [],
+    "queryString": []
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": null,
+        "name": "Posts",
+        "hash": "ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+        "hasQuery": false,
+        "variables": null
+      }
+    ],
+    "outcome": null
+  }
+}

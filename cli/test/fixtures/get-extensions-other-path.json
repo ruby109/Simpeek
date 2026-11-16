@@ -1,0 +1,21 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/?extensions=%7B%7D&query=%7Bviewer%7Bid%7D%7D",
+    "headers": [],
+    "queryString": []
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "query",
+        "name": "(anonymous)",
+        "hash": null,
+        "hasQuery": true,
+        "variables": null
+      }
+    ],
+    "outcome": null
+  }
+}

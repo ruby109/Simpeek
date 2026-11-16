@@ -1,0 +1,30 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql?query=%7Bviewer%7Bid%7D%7D",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": ""
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "query",
+        "name": "(anonymous)",
+        "hash": null,
+        "hasQuery": true,
+        "variables": null
+      }
+    ],
+    "outcome": null
+  }
+}
