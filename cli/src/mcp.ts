@@ -5,8 +5,8 @@ import { z } from 'zod';
 import { launch, waitFor } from './actions.ts';
 import { readLogs, type Source } from './logs/sources.ts';
 import { logLine, timeline } from './logs/view.ts';
-import { addMark, listSessions, loadSession, resolveSession, sessionEnded } from './store.ts';
-import { applyFilters, clock, detail, opsTable, row, sinceToMs } from './views.ts';
+import { addMark, listSessions, resolveSession, sessionEnded } from './store.ts';
+import { applyFilters, clock, detail, openSession, opsTable, row, sinceToMs } from './views.ts';
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 const fail = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
@@ -61,19 +61,19 @@ export async function serve() {
   });
 
   server.registerTool('net_list', {
-    description: 'One line per request: id, time, GraphQL op (Q/M + name) or METHOD host/path, outcome (GraphQL errors count as failures even on HTTP 200), duration, size. Pass cursor (the previous nextCursor) to get only newer requests.',
+    description: 'One line per request: id, time, GraphQL op (Q/M/S + name, ? when a persisted query\'s type is unknown) or METHOD host/path, outcome (GraphQL errors count as failures even on HTTP 200), duration, size. `↻ not persisted` is the first step of a persisted query, not a failure; `✗ no retry: not persisted` means the client never sent the document. Pass cursor (the previous nextCursor) to get only newer requests.',
     inputSchema: { ...target, ...filters, cursor: z.number().optional(), limit: z.number().optional().describe('Default 30 (most recent)') },
   }, async (a) => {
     const info = resolveSession(a);
     if (!info) return text('no sessions recorded yet; start one with net_launch');
     try {
-      const reader = loadSession(info);
-      const { kept, hidden } = applyFilters(reader.all(), info, { ...a, afterId: a.cursor });
+      const s = openSession(info);
+      const { kept, hidden } = applyFilters(s.all(), s, { ...a, afterId: a.cursor });
       const limit = a.limit ?? 30;
       const shown = a.cursor !== undefined ? kept.slice(0, limit) : kept.slice(-limit);
-      const lastId = reader.all().at(-1)?.id ?? a.cursor ?? 0;
+      const lastId = s.all().at(-1)?.id ?? a.cursor ?? 0;
       const nextCursor = a.cursor !== undefined && shown.length ? shown.at(-1)!.id : lastId;
-      const lines = shown.map((e) => row(e, info));
+      const lines = shown.map((e) => row(e, s));
       const foot = [`session ${info.session} (${info.bundle})`, `showing ${shown.length}/${kept.length}`];
       if (hidden) foot.push(`${hidden} noise hidden (all=true)`);
       if (sessionEnded(info)) foot.push('ended: the app is no longer running; net_launch starts a new session');
@@ -98,9 +98,10 @@ export async function serve() {
   }, async (a) => {
     const info = resolveSession(a);
     if (!info) return fail('no sessions recorded yet');
-    const entry = loadSession(info).entries.get(a.id);
+    const s = openSession(info);
+    const entry = s.get(a.id);
     if (!entry) return fail(`no request #${a.id} in session ${info.session}`);
-    return text(detail(entry, info, a));
+    return text(detail(entry, s, a));
   });
 
   server.registerTool('net_ops', {
@@ -109,8 +110,9 @@ export async function serve() {
   }, async (a) => {
     const info = resolveSession(a);
     if (!info) return text('no sessions recorded yet');
-    const { kept } = applyFilters(loadSession(info).all(), info, a);
-    return text(opsTable(kept, info));
+    const s = openSession(info);
+    const { kept } = applyFilters(s.all(), s, a);
+    return text(opsTable(kept, s));
   });
 
   server.registerTool('net_mark', {
@@ -122,13 +124,16 @@ export async function serve() {
   });
 
   server.registerTool('net_wait', {
-    description: 'Block until a request matching the filters finishes (default: any non-noise request), then return it. Use right after a UI action, e.g. op="UpdatePost".',
+    description: 'Block until a request matching the filters finishes (default: any non-noise request), then return it. Use right after a UI action, e.g. op="UpdatePost". Persisted-query misses are not returned while a retry is expected; on timeout, a pending miss is returned with a note.',
     inputSchema: { bundle: target.bundle, ...filters, timeoutSec: z.number().optional().describe('Default 15') },
   }, async (a) => {
     const sinceMs = a.since ? sinceToMs(a.since) ?? Date.now() : Date.now();
-    const { info, entries } = await waitFor({ bundle: a.bundle, filters: a, timeoutMs: (a.timeoutSec ?? 15) * 1000, sinceMs });
-    if (!info || !entries.length) return text(`timed out after ${a.timeoutSec ?? 15}s with no matching request`);
-    return text(entries.map((e) => row(e, info)).join('\n'));
+    const { session, entries, pending } = await waitFor({ bundle: a.bundle, filters: a, timeoutMs: (a.timeoutSec ?? 15) * 1000, sinceMs });
+    if (session && entries.length) return text(entries.map((e) => row(e, session)).join('\n'));
+    if (session && pending.length) {
+      return text([...pending.map((e) => row(e, session)), '', 'persisted-query miss, retry not seen yet'].join('\n'));
+    }
+    return text(`timed out after ${a.timeoutSec ?? 15}s with no matching request`);
   });
 
   // ---------- logs (separate from network capture) ----------

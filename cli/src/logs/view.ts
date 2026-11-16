@@ -1,6 +1,6 @@
 // Text views for logs, and the timeline that interleaves logs with network requests.
-import { listSessions, loadSession, resolveSession } from '../store.ts';
-import { clock, isNoise, row } from '../views.ts';
+import { listSessions, resolveSession } from '../store.ts';
+import { clock, isNoise, openSession, row } from '../views.ts';
 import { readLogs, type LogLine, type Source } from './sources.ts';
 
 export function logLine(l: LogLine): string {
@@ -19,9 +19,10 @@ export function timeline(q: TimelineQuery): string[] {
 
   const info = resolveSession({ bundle });
   if (info) {
-    for (const e of loadSession(info).all()) {
+    const s = openSession(info);
+    for (const e of s.all()) {
       if (e.startMs < q.sinceMs || (!q.all && isNoise(e))) continue;
-      const r = row(e, info);
+      const r = row(e, s);
       if (!re || re.test(r)) items.push({ t: e.startMs, text: `${clock(e.startMs)}  net  ${r.replace(/^#\d+\s+\S+\s+/, (m) => m.split(/\s+/)[0] + ' ')}` });
     }
   }

@@ -3,8 +3,8 @@ import { parseArgs } from 'node:util';
 import { launch } from './actions.ts';
 import { followLogs, readLogs, type Source } from './logs/sources.ts';
 import { logLine, timeline } from './logs/view.ts';
-import { addMark, bodyText, listSessions, loadSession, readConfig, resolveSession, SessionReader, sessionEnded, writeConfig, type SessionInfo } from './store.ts';
-import { applyFilters, clock, detail, opsTable, pick, row, sinceToMs, tailLine, type Filters } from './views.ts';
+import { addMark, bodyText, listSessions, readConfig, resolveSession, SessionReader, sessionEnded, writeConfig, type SessionInfo } from './store.ts';
+import { applyFilters, clock, detail, openSession, opsTable, pick, row, Session, sinceToMs, tailLine, type Filters } from './views.ts';
 
 const USAGE = `simpeek — iOS Simulator network traffic for humans and agents
 
@@ -65,25 +65,37 @@ function die(msg: string): never {
 }
 
 async function tail() {
-  let reader: SessionReader | undefined;
+  let s: Session | undefined;
+  // Misses printed as `↻ not persisted` whose retry has not been seen yet; a correction line is
+  // printed for each one that turns out to be abandoned.
+  let pendingShown = new Set<number>();
   const history = Number(o.history ?? 0);
   const attach = (info: SessionInfo, replay: boolean) => {
-    reader = new SessionReader(info);
-    const lines = reader.poll();
+    s = new Session(info, new SessionReader(info));
+    pendingShown = new Set();
+    const lines = s.poll();
     console.log(`── ${info.bundle} session ${info.session} (${String(info.meta.device ?? '')}) ──`);
     if (replay) {
-      const { kept } = applyFilters(reader.all(), info, filters);
-      for (const e of history > 0 ? kept.slice(-history) : []) console.log(row(e, info));
+      const { kept } = applyFilters(s.all(), s, filters);
+      for (const e of history > 0 ? kept.slice(-history) : []) console.log(row(e, s));
     } else {
       emit(lines);
     }
   };
-  const emit = (lines: ReturnType<SessionReader['poll']>) => {
+  const emit = (lines: ReturnType<Session['poll']>) => {
     for (const line of lines) {
       if (line._type !== 'start' && line._type !== 'end') continue;
-      const e = reader!.entries.get(line._id);
-      if (!e || !applyFilters([e], reader!.info, filters).kept.length) continue;
-      console.log(tailLine(line._type, e, reader!.info));
+      const e = s!.get(line._id);
+      if (!e || !applyFilters([e], s!, filters).kept.length) continue;
+      console.log(tailLine(line._type, e, s!));
+      if (line._type === 'end' && s!.missState(e) === 'pending') pendingShown.add(e.id);
+    }
+    for (const id of pendingShown) {
+      const e = s!.get(id)!;
+      const state = s!.missState(e);
+      if (state === 'pending') continue;
+      pendingShown.delete(id);
+      if (state === 'abandoned') console.log(tailLine('end', e, s!));
     }
   };
   const latest = listSessions(o.bundle)[0];
@@ -91,15 +103,18 @@ async function tail() {
   else console.log('waiting for a SimPeek session… (simpeek launch <bundle>)');
   setInterval(() => {
     const newest = listSessions(o.bundle)[0];
-    if (newest && newest.file !== reader?.info.file) attach(newest, false);
-    else if (reader) emit(reader.poll());
+    if (newest && newest.file !== s?.info.file) {
+      if (s) emit(s.poll()); // a relaunch abandons the old session's pending misses
+      attach(newest, false);
+    } else if (s) emit(s.poll());
   }, 250);
 }
 
 /** Newest response (across sessions) matching the filters whose JSON has a value at `selector`. */
 function extract(selector: string): unknown {
   for (const info of listSessions(o.bundle)) {
-    const { kept } = applyFilters(loadSession(info).all(), info, { ...filters, all: true });
+    const s = openSession(info);
+    const { kept } = applyFilters(s.all(), s, { ...filters, all: true });
     for (const e of kept.reverse()) {
       try {
         const v = pick(JSON.parse(bodyText(info, e.response?.content) ?? ''), selector);
@@ -146,18 +161,21 @@ if (!cmd || o.help) {
   console.log(typeof value === 'string' ? value : JSON.stringify(value));
 } else if (cmd === 'list') {
   const info = session();
-  const { kept, hidden } = applyFilters(loadSession(info).all(), info, filters);
-  for (const e of kept.slice(-Number(o.limit ?? 30))) console.log(row(e, info));
+  const s = openSession(info);
+  const { kept, hidden } = applyFilters(s.all(), s, filters);
+  for (const e of kept.slice(-Number(o.limit ?? 30))) console.log(row(e, s));
   const ended = sessionEnded(info) ? ' · ended: the app is no longer running; `simpeek launch` starts a new session' : '';
   console.log(`\nsession ${info.session} (${info.bundle}) · ${kept.length} shown${hidden ? ` · ${hidden} noise hidden (--all)` : ''}${ended}`);
 } else if (cmd === 'get') {
   const info = session();
-  const e = loadSession(info).entries.get(Number(args[0]));
+  const s = openSession(info);
+  const e = s.get(Number(args[0]));
   if (!e) die(`no request #${args[0]} in session ${info.session}`);
-  console.log(detail(e!, info, { include: o.headers ? 'headers' : 'summary', query: o.query, select: o.select, raw: o.raw, redact: !o['no-redact'] }));
+  console.log(detail(e!, s, { include: o.headers ? 'headers' : 'summary', query: o.query, select: o.select, raw: o.raw, redact: !o['no-redact'] }));
 } else if (cmd === 'ops') {
   const info = session();
-  console.log(opsTable(applyFilters(loadSession(info).all(), info, filters).kept, info));
+  const s = openSession(info);
+  console.log(opsTable(applyFilters(s.all(), s, filters).kept, s));
 } else if (cmd === 'sessions') {
   for (const s of listSessions(o.bundle)) console.log(`${s.session}  ${s.bundle}  ${String(s.meta.device ?? '')}  last write ${clock(s.mtimeMs)}`);
 } else if (cmd === 'mark') {

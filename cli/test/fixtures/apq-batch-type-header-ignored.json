@@ -1,0 +1,41 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/api/graphql",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      },
+      {
+        "name": "X-APOLLO-OPERATION-TYPE",
+        "value": "query"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "[{\"operationName\":\"A\",\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890\"}}},{\"operationName\":\"B\",\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"cd34ab12ef567890cd34ab12ef567890cd34ab12ef567890cd34ab12ef567890\"}}}]"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": null,
+        "name": "A",
+        "hash": "ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+        "hasQuery": false,
+        "variables": null
+      },
+      {
+        "type": null,
+        "name": "B",
+        "hash": "cd34ab12ef567890cd34ab12ef567890cd34ab12ef567890cd34ab12ef567890",
+        "hasQuery": false,
+        "variables": null
+      }
+    ],
+    "outcome": null
+  }
+}

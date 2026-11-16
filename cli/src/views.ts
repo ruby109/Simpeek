@@ -1,7 +1,7 @@
 // Text views shared by the CLI and the MCP server: one-line rows, filters, details, per-operation stats.
-import { outcome, recognize, typeLetter, type GqlOutcome, type Operation } from './graphql.ts';
+import { outcome, recognize, typeLetter, type GqlOutcome, type Operation, type OpType } from './graphql.ts';
 import { findOperation } from './sourcemap.ts';
-import { bodyText, findMark, readConfig, type Entry, type Header, type SessionInfo } from './store.ts';
+import { bodyText, findMark, listSessions, loadSession, readConfig, type Entry, type Header, type Line, type SessionInfo } from './store.ts';
 
 // ---------- noise ----------
 
@@ -30,63 +30,182 @@ export type View = {
   recognitionError?: string;
 };
 
-const views = new WeakMap<Entry, View>();
+/**
+ * A persisted-query miss is abandoned when no retry came: another request started this long after
+ * the miss arrived. Phase 0 measured 0 to 7 ms from miss to retry (Apollo iOS 2.5.0).
+ */
+export const MISS_WINDOW_MS = 2000;
+/** Times are rounded to milliseconds, so a retry can appear to start slightly before the miss arrived. */
+const ARRIVAL_SLACK_MS = 10;
 
-export function view(e: Entry, info: SessionInfo): View {
-  const cached = views.get(e);
-  if (cached && (!e.done || cached.state !== '…')) return cached;
-  let ops: Operation[] | undefined;
-  let gql: GqlOutcome | undefined;
-  let recognitionError: string | undefined;
-  try {
-    ops = recognize(e.request, bodyText(info, e.request.postData));
-    gql = ops && e.done ? outcome(e.response, bodyText(info, e.response?.content, { lossy: true }), ops) : undefined;
-  } catch (err) {
-    ops = undefined;
-    gql = undefined;
-    recognitionError = String((err as Error)?.message ?? err);
+export type MissState = 'retried' | 'pending' | 'abandoned';
+
+/** Where a session's entries come from: a SessionReader, or entries built in memory (tests). */
+export type EntrySource = { entries: Map<number, Entry>; all(): Entry[]; poll?(): Line[] };
+
+type Recognition = { done: boolean; ops?: Operation[]; gql?: GqlOutcome; outcomeRead?: boolean; error?: string };
+
+/**
+ * The entries of one session plus what needs the whole session to know: types learned from other
+ * requests with the same persisted-query hash, and whether each miss was retried. Every command
+ * renders requests through a Session, so the session pass always runs before filters and rows.
+ */
+export class Session {
+  readonly info: SessionInfo;
+  private readonly source: EntrySource;
+  private readonly recognitions = new WeakMap<Entry, Recognition>();
+  private learned = new Map<string, { type: OpType; name: string }>();
+  private misses = new Map<number, MissState>();
+
+  constructor(info: SessionInfo, source: EntrySource) {
+    this.info = info;
+    this.source = source;
+    this.pass();
   }
-  const label = ops?.length
-    ? `${typeLetter(ops[0].type)} ${ops.map((o) => o.name).join('+')}`
-    : `${e.request.method} ${shortUrl(e.request.url)}`;
 
-  let state: string;
-  let failed = false;
-  const status = e.response?.status;
-  if (!e.done) state = '…';
-  else if (e.error) { state = `✗ ${e.error.message}`; failed = true; }
-  else if (status !== undefined && status >= 400) { state = `✗ ${status}`; failed = true; }
-  else if (recognitionError !== undefined) { state = '✗ recognition failed'; failed = true; }
-  else if (gql && gql.status !== 'ok') {
-    const first = gql.errors[0];
-    const what = first
-      ? [first.code, first.path ? `@${first.path}` : ''].filter(Boolean).join(' ') || trunc(first.message, 60)
-      : gql.incomplete ? 'incomplete response' : 'invalid JSON';
-    state = gql.status === 'partial' ? `⚠ partial: ${what}` : `✗ ${what}`;
-    if (gql.errors.length > 1) {
-      const same = gql.errors.every((x) => x.code === first.code && x.message === first.message);
-      state += same ? ` ×${gql.errors.length}` : ` (+${gql.errors.length - 1})`;
+  all(): Entry[] { return this.source.all(); }
+  get(id: number): Entry | undefined { return this.source.entries.get(id); }
+
+  /** Reads appended lines (for a reader) and runs the session pass again. */
+  poll(): Line[] {
+    const lines = this.source.poll?.() ?? [];
+    this.pass();
+    return lines;
+  }
+
+  missState(e: Entry): MissState | undefined { return this.misses.get(e.id); }
+
+  view(e: Entry): View {
+    const r = this.recognition(e);
+    const ops = r.ops?.map((o) => this.withLearned(o));
+    const gql = r.gql;
+    const label = ops?.length
+      ? `${typeLetter(ops[0].type)} ${ops.map((o) => o.name).join('+')}`
+      : `${e.request.method} ${shortUrl(e.request.url)}`;
+
+    let state: string;
+    let failed = false;
+    const status = e.response?.status;
+    if (!e.done) state = '…';
+    else if (e.error) { state = `✗ ${e.error.message}`; failed = true; }
+    else if (gql?.status === 'miss') {
+      if (this.misses.get(e.id) === 'abandoned') { state = '✗ no retry: not persisted'; failed = true; }
+      else state = '↻ not persisted';
+    } else if (status !== undefined && status >= 400) { state = `✗ ${status}`; failed = true; }
+    else if (r.error !== undefined) { state = '✗ recognition failed'; failed = true; }
+    else if (gql && gql.status !== 'ok') {
+      const first = gql.errors[0];
+      const what = first
+        ? [first.code, first.path ? `@${first.path}` : ''].filter(Boolean).join(' ') || trunc(first.message, 60)
+        : gql.incomplete ? 'incomplete response' : 'invalid JSON';
+      state = gql.status === 'partial' ? `⚠ partial: ${what}` : `✗ ${what}`;
+      if (gql.errors.length > 1) {
+        const same = gql.errors.every((x) => x.code === first.code && x.message === first.message);
+        state += same ? ` ×${gql.errors.length}` : ` (+${gql.errors.length - 1})`;
+      }
+      failed = true;
+    } else state = ops ? 'ok' : String(status ?? '');
+
+    return { ops, gql, label, state, failed, recognitionError: r.error };
+  }
+
+  /** Operations are read once per entry (again when it finishes); the outcome only when needed. */
+  private recognition(e: Entry, withOutcome = true): Recognition {
+    let r = this.recognitions.get(e);
+    if (!r || r.done !== e.done) {
+      r = { done: e.done };
+      try { r.ops = recognize(e.request, bodyText(this.info, e.request.postData)); } catch (err) { r.error = message(err); }
+      this.recognitions.set(e, r);
     }
-    failed = true;
-  } else state = ops ? 'ok' : String(status ?? '');
+    if (withOutcome && !r.outcomeRead && r.ops && e.done && r.error === undefined) {
+      r.outcomeRead = true;
+      try {
+        r.gql = outcome(e.response, bodyText(this.info, e.response?.content, { lossy: true }), r.ops);
+      } catch (err) {
+        r.ops = undefined;
+        r.error = message(err);
+      }
+    }
+    return r;
+  }
 
-  const v: View = { ops, gql, label, state, failed, recognitionError };
-  views.set(e, v);
-  return v;
+  private withLearned(o: Operation): Operation {
+    if (o.type !== undefined || o.hash === undefined) return o;
+    const l = this.learned.get(o.hash);
+    return l ? { ...o, type: l.type, name: o.name === '(anonymous)' ? l.name : o.name } : o;
+  }
+
+  /**
+   * Learns types from requests that carry a hash and its document, and decides for each miss
+   * whether it was retried. Reads request bodies of all entries and responses of hash-only ones.
+   */
+  private pass() {
+    const entries = this.all();
+    const ops = entries.map((e) => this.recognition(e, false).ops ?? []);
+    const learned = new Map<string, { type: OpType; name: string }>();
+    entries.forEach((_, i) => {
+      for (const o of ops[i]) if (o.hash && o.query !== undefined && o.type) learned.set(o.hash, { type: o.type, name: o.name });
+    });
+
+    const misses = new Map<number, MissState>();
+    let newerSession: boolean | undefined;
+    entries.forEach((m, i) => {
+      if (!m.done || !ops[i].length || ops[i].some((o) => o.hash === undefined || o.query !== undefined)) return;
+      if (this.recognition(m).gql?.status !== 'miss') return;
+      const arrival = m.startMs + (m.time ?? 0);
+      let abandoned = false;
+      let unresolved = false;
+      for (const o of ops[i]) {
+        // The first later request with this hash decides: with the document it is the retry.
+        const j = entries.findIndex((x, k) => k > i && x.startMs >= arrival - ARRIVAL_SLACK_MS && ops[k].some((p) => p.hash === o.hash));
+        if (j < 0) unresolved = true;
+        else if (ops[j].find((p) => p.hash === o.hash)!.query === undefined) abandoned = true;
+      }
+      if (!abandoned && unresolved) {
+        if (newerSession === undefined) {
+          const newest = listSessions(this.info.bundle)[0];
+          newerSession = !!newest && newest.file !== this.info.file;
+        }
+        abandoned = newerSession || entries.some((x) => x.startMs >= arrival + MISS_WINDOW_MS);
+        if (!abandoned) { misses.set(m.id, 'pending'); return; }
+      }
+      misses.set(m.id, abandoned ? 'abandoned' : 'retried');
+    });
+    this.learned = learned;
+    this.misses = misses;
+  }
+}
+
+export function openSession(info: SessionInfo): Session {
+  return new Session(info, loadSession(info));
+}
+
+const message = (err: unknown) => String((err as Error)?.message ?? err);
+
+/**
+ * Requests that finished at or after `sinceMs` and match the filters, without persisted-query
+ * misses that were retried or may still be (`matches`), and those still pending (`pending`).
+ */
+export function waitSelection(s: Session, f: Filters, sinceMs: number): { matches: Entry[]; pending: Entry[] } {
+  const done = s.all().filter((e) => e.done && e.startMs + (e.time ?? 0) >= sinceMs);
+  const { kept } = applyFilters(done, s, { ...f, since: undefined });
+  const matches = kept.filter((e) => { const m = s.missState(e); return m !== 'pending' && m !== 'retried'; });
+  const pending = kept.filter((e) => s.missState(e) === 'pending');
+  return { matches, pending };
 }
 
 // ---------- rows ----------
 
-export function row(e: Entry, info: SessionInfo): string {
-  const v = view(e, info);
+export function row(e: Entry, s: Session): string {
+  const v = s.view(e);
   const ms = e.done ? `${e.time}ms` : '';
   const size = e.response ? human(e.response.content.size ?? 0) : '';
   return [pad(`#${e.id}`, 5), clock(e.startMs), pad(v.label, 34), pad(v.state, 18), pad(ms, 7), size].join('  ').trimEnd();
 }
 
 /** Tail line for a start or end event. */
-export function tailLine(kind: 'start' | 'end', e: Entry, info: SessionInfo): string {
-  const v = view(e, info);
+export function tailLine(kind: 'start' | 'end', e: Entry, s: Session): string {
+  const v = s.view(e);
   if (kind === 'start') {
     const vars = v.ops?.[0]?.variables;
     const args = vars && typeof vars === 'object' && Object.keys(vars).length ? '  ' + trunc(compactJson(redact(vars)), 80) : '';
@@ -126,7 +245,7 @@ export function sinceToMs(since: string): number | undefined {
   return findMark(since);
 }
 
-export function applyFilters(entries: Entry[], info: SessionInfo, f: Filters): { kept: Entry[]; hidden: number } {
+export function applyFilters(entries: Entry[], s: Session, f: Filters): { kept: Entry[]; hidden: number } {
   let hidden = 0;
   const sinceMs = f.since ? sinceToMs(f.since) : undefined;
   if (f.since && sinceMs === undefined) throw new Error(`unknown since "${f.since}" (use -5m, 15:20, ISO time, or a mark name)`);
@@ -140,9 +259,9 @@ export function applyFilters(entries: Entry[], info: SessionInfo, f: Filters): {
     if (pathRe && !pathRe.test(pathOf(e.request.url))) return false;
     if (f.method && e.request.method.toUpperCase() !== f.method.toUpperCase()) return false;
     if (f.minMs !== undefined && (e.time ?? Infinity) < f.minMs) return false;
-    const v = view(e, info);
+    const v = s.view(e);
     if (opRe && !(v.ops ?? []).some((o) => opRe.test(o.name))) return false;
-    if (f.type && !(v.ops ?? []).some((o) => o.type.startsWith(f.type!.toLowerCase()))) return false;
+    if (f.type && !(v.ops ?? []).some((o) => o.type?.startsWith(f.type!.toLowerCase()))) return false;
     if (f.status && !matchStatus(e, v, f.status)) return false;
     return true;
   });
@@ -155,7 +274,7 @@ function matchStatus(e: Entry, v: View, s: string): boolean {
     case 'pending': return !e.done;
     case 'error': case 'failed': return v.failed;
     case 'ok': return e.done && !v.failed;
-    case 'gqlerror': return !!v.gql && v.gql.status !== 'ok';
+    case 'gqlerror': return !!v.gql && v.gql.status !== 'ok' && !(v.gql.status === 'miss' && !v.failed);
     default:
       if (/^\dxx$/i.test(s)) return status !== undefined && Math.floor(status / 100) === Number(s[0]);
       return String(status) === s;
@@ -166,8 +285,9 @@ function matchStatus(e: Entry, v: View, s: string): boolean {
 
 export type DetailOptions = { include?: 'summary' | 'headers' | 'all'; query?: boolean; select?: string; raw?: boolean; redact?: boolean };
 
-export function detail(e: Entry, info: SessionInfo, o: DetailOptions = {}): string {
-  const v = view(e, info);
+export function detail(e: Entry, s: Session, o: DetailOptions = {}): string {
+  const v = s.view(e);
+  const info = s.info;
   const doRedact = o.redact !== false;
   const shape = (x: unknown) => {
     const r = doRedact ? redact(x) : x;
@@ -203,7 +323,8 @@ export function detail(e: Entry, info: SessionInfo, o: DetailOptions = {}): stri
     v.ops.forEach((op, i) => {
       const tag = v.ops!.length > 1 ? ` [${i}] ${op.name}` : '';
       if (op.variables !== undefined) out.push('', `variables${tag}:`, shape(op.variables));
-      if (o.query || o.include === 'all') out.push('', `query${tag}:`, op.query.trim());
+      if (op.query === undefined) out.push('', `query${tag}: persisted (sha256 ${op.hash?.slice(0, 12)}…), document not sent`);
+      else if (o.query || o.include === 'all') out.push('', `query${tag}:`, op.query.trim());
       else out.push('', `query${tag}: ${op.query.trim().split('\n').length} lines (pass query=true to show)`);
     });
   } else if (e.request.postData) {
@@ -271,11 +392,11 @@ export function pick(value: unknown, selector: string): unknown {
 
 // ---------- per-operation stats ----------
 
-export function opsTable(entries: Entry[], info: SessionInfo): string {
+export function opsTable(entries: Entry[], s: Session): string {
   const groups = new Map<string, { n: number; failed: number; times: number[] }>();
   for (const e of entries) {
     if (!e.done) continue;
-    const v = view(e, info);
+    const v = s.view(e);
     const key = v.ops?.length ? v.label : `${e.request.method} ${hostOf(e.request.url)}${pathOf(e.request.url)}`;
     const g = groups.get(key) ?? { n: 0, failed: 0, times: [] };
     g.n++;

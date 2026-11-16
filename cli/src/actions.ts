@@ -3,8 +3,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listSessions, loadSession, ROOT, SessionReader, type Entry, type SessionInfo } from './store.ts';
-import { applyFilters, type Filters } from './views.ts';
+import { listSessions, ROOT, type Entry, type SessionInfo } from './store.ts';
+import { openSession, waitSelection, type Filters, type Session } from './views.ts';
 
 // A checkout uses the dylib built by ios/scripts/build-dylib.sh; the published package ships one in vendor/.
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -69,22 +69,23 @@ function startConsoleCapture(bundle: string, device: string, env: NodeJS.Process
   return file;
 }
 
-/** Waits until a request matching `filters` finishes after `sinceMs`; returns all such entries. */
+/**
+ * Waits until a request matching `filters` finishes after `sinceMs`; returns all such entries.
+ * Persisted-query misses are not returned while their retry may still come; on timeout, the ones
+ * still pending are returned in `pending`.
+ */
 export async function waitFor(
   opts: { bundle?: string; filters: Filters; timeoutMs: number; sinceMs: number },
-): Promise<{ info?: SessionInfo; entries: Entry[] }> {
+): Promise<{ session?: Session; entries: Entry[]; pending: Entry[] }> {
   const deadline = Date.now() + opts.timeoutMs;
-  let reader: SessionReader | undefined;
+  let s: Session | undefined;
   while (true) {
     const latest = listSessions(opts.bundle)[0];
-    if (latest && latest.file !== reader?.info.file) reader = loadSession(latest);
-    else reader?.poll();
-    if (reader) {
-      const done = reader.all().filter((e) => e.done && e.startMs + (e.time ?? 0) >= opts.sinceMs);
-      const { kept } = applyFilters(done, reader.info, { ...opts.filters, since: undefined });
-      if (kept.length) return { info: reader.info, entries: kept };
-    }
-    if (Date.now() >= deadline) return { info: reader?.info, entries: [] };
+    if (latest && latest.file !== s?.info.file) s = openSession(latest);
+    else s?.poll();
+    const { matches, pending } = s ? waitSelection(s, opts.filters, opts.sinceMs) : { matches: [], pending: [] };
+    if (matches.length) return { session: s, entries: matches, pending: [] };
+    if (Date.now() >= deadline) return { session: s, entries: [], pending };
     await sleep(250);
   }
 }

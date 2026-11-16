@@ -1,0 +1,46 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/api/graphql",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "{\"operationName\":\"Posts\",\"variables\":{\"first\":20},\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890\"}},\"query\":\"query Posts{posts{id}}\"}"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content": {
+      "mimeType": "application/json",
+      "text": "{\"errors\":[{\"message\":\"PersistedQueryNotFound\",\"extensions\":{\"code\":\"PERSISTED_QUERY_NOT_FOUND\"}}]}"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": "query",
+        "name": "Posts",
+        "hash": "ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+        "hasQuery": true,
+        "variables": {
+          "first": 20
+        }
+      }
+    ],
+    "outcome": {
+      "status": "errors",
+      "codes": [
+        "PERSISTED_QUERY_NOT_FOUND"
+      ],
+      "parts": null,
+      "incomplete": false
+    }
+  }
+}

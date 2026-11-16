@@ -2,10 +2,14 @@
 import type { Request, Response } from './store.ts';
 
 export type OpType = 'query' | 'mutation' | 'subscription';
-export type Operation = { type: OpType; name: string; query: string; variables?: unknown };
+/**
+ * One operation of a request. `type` is undefined when the request sent only a persisted-query
+ * hash and no header names the type. `query` is undefined for a hash-only operation.
+ */
+export type Operation = { type?: OpType; name: string; query?: string; variables?: unknown; hash?: string };
 export type GqlError = { message: string; path?: string; code?: string };
 export type GqlOutcome = {
-  status: 'ok' | 'errors' | 'partial' | 'invalid';
+  status: 'ok' | 'errors' | 'partial' | 'invalid' | 'miss';
   errors: GqlError[];
   /** Readable parts of a multipart/mixed (deferred) response; set when there is at least one. */
   parts?: object[];
@@ -26,16 +30,35 @@ export function recognize(request: Request, text: string | undefined): Operation
 
   let body: unknown;
   try { body = JSON.parse(text); } catch { return GRAPHQL_PATH.test(pathname) ? [] : undefined; }
-  const items = Array.isArray(body) ? body : [body];
-  const ops: Operation[] = [];
-  for (const item of items) {
-    if (!item || typeof item !== 'object' || typeof (item as any).query !== 'string') continue;
-    const { query, variables, operationName } = item as { query: string; variables?: unknown; operationName?: string };
-    const parsed = parseHead(query, operationName);
-    ops.push({ ...parsed, query, variables });
-  }
+  const items = (Array.isArray(body) ? body : [body]).map(operationItem).filter((x) => x !== undefined);
+  const headerType = items.length === 1 ? typeFromHeader(request) : undefined;
+  const ops: Operation[] = items.map(({ query, variables, operationName, hash }) => {
+    if (query !== undefined) return { ...parseHead(query, operationName), query, variables, ...(hash ? { hash } : {}) };
+    return { ...(headerType ? { type: headerType } : {}), name: operationName ?? '(anonymous)', variables, hash };
+  });
   if (ops.length === 0 && !GRAPHQL_PATH.test(pathname)) return undefined;
   return ops;
+}
+
+type Item = { query?: string; variables?: unknown; operationName?: string; hash?: string };
+
+/** An operation object: one with a `query` string, or with a persisted-query hash. */
+function operationItem(item: unknown): Item | undefined {
+  if (!item || typeof item !== 'object') return undefined;
+  const o = item as any;
+  const query = typeof o.query === 'string' ? o.query : undefined;
+  const h = o.extensions?.persistedQuery?.sha256Hash;
+  const hash = typeof h === 'string' ? h : undefined;
+  if (query === undefined && hash === undefined) return undefined;
+  const operationName = typeof o.operationName === 'string' && o.operationName ? o.operationName : undefined;
+  return { query, variables: o.variables, operationName, hash };
+}
+
+/** The type named by the X-APOLLO-OPERATION-TYPE header (Apollo iOS 1.x), if any. */
+function typeFromHeader(request: Request): OpType | undefined {
+  const h = request.headers?.find((x) => x.name.toLowerCase() === 'x-apollo-operation-type');
+  const v = h?.value.trim().toLowerCase();
+  return v === 'query' || v === 'mutation' || v === 'subscription' ? v : undefined;
 }
 
 function parseHead(query: string, operationName?: string): { type: OpType; name: string } {
@@ -52,12 +75,16 @@ function parseHead(query: string, operationName?: string): { type: OpType; name:
 export function outcome(
   response: Pick<Response, 'status' | 'content'> | undefined, text: string | undefined, ops: Operation[],
 ): GqlOutcome | undefined {
-  void ops; // used by the persisted-query rule
   if (text === undefined) return undefined;
   const mixed = multipart(response?.content.mimeType, text);
   if (mixed) return mixedOutcome(mixed, !!response?.content._truncated);
   let body: any;
   try { body = JSON.parse(text); } catch { return { status: 'invalid', errors: [] }; }
+  const result = singleOutcome(body);
+  return isMiss(result, response?.status, ops) ? { ...result, status: 'miss' } : result;
+}
+
+function singleOutcome(body: any): GqlOutcome {
   const results = Array.isArray(body) ? body : [body];
   const errors: GqlError[] = [];
   let hasData = false;
@@ -129,6 +156,17 @@ function mixedOutcome(m: Multipart, truncated: boolean): GqlOutcome {
 }
 
 /**
+ * A persisted-query miss: the request sent only hashes, and every error says the server does not
+ * know the hash. Clients answer it by sending the request again with the document.
+ */
+function isMiss(g: GqlOutcome, status: number | undefined, ops: Operation[]): boolean {
+  if (g.status !== 'errors' || (status !== undefined && status >= 500)) return false;
+  if (ops.length === 0 || ops.some((o) => o.hash === undefined || o.query !== undefined)) return false;
+  return g.errors.length > 0
+    && g.errors.every((e) => e.code === 'PERSISTED_QUERY_NOT_FOUND' || e.message === 'PersistedQueryNotFound');
+}
+
+/**
  * Errors of an `errors` value. A value that is neither absent, null nor an array counts as one
  * error whose message is the value as JSON.
  */
@@ -142,4 +180,4 @@ function collectErrors(value: unknown): GqlError[] {
   }));
 }
 
-export const typeLetter = (t: OpType) => (t === 'mutation' ? 'M' : t === 'subscription' ? 'S' : 'Q');
+export const typeLetter = (t?: OpType) => (t === undefined ? '?' : t === 'mutation' ? 'M' : t === 'subscription' ? 'S' : 'Q');

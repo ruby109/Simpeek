@@ -1,0 +1,32 @@
+{
+  "source": "rules",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/v2/gateway",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "queryString": [],
+    "postData": {
+      "mimeType": "application/json",
+      "text": "{\"operationName\":\"Posts\",\"variables\":{\"first\":20},\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890\"}}}"
+    }
+  },
+  "expect": {
+    "ops": [
+      {
+        "type": null,
+        "name": "Posts",
+        "hash": "ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+        "hasQuery": false,
+        "variables": {
+          "first": 20
+        }
+      }
+    ],
+    "outcome": null
+  }
+}

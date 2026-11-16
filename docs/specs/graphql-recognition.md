@@ -549,8 +549,11 @@ Commits follow the project rule of one logical change each.
 **First**: commit the pending edits to `README.md` and `README.zh-CN.md` (TODO block "Capture and
 storage" / "抓取与存储") as their own commit.
 
-The phases put the false failures first. Each phase leaves `npm test` passing. A release can be
-cut after Phase 3; Phase 4 can follow in 0.2.x.
+The phases put the false failures first. Each phase leaves `npm test` passing. Release after
+Phase 4, not after Phase 3: with Phase 3 alone, a miss whose retry goes by GET
+(`useGETForPersistedQueryRetry`, seen in Phase 0) is shown as `✗ no retry: not persisted`, because
+GET is recognized only in Phase 4. Phase 3 measured `list` and `get` about 15 to 20 ms slower on the
+293-request session (the pass reads every request body, noise included), within the limit.
 
 ### Phase 0: Baseline and recordings (half a day; when it runs out, unrecorded shapes take outcome 2 or 3)
 
