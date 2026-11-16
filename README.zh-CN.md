@@ -73,6 +73,10 @@ app 日志文件按 app 配置，路径相对于它的数据容器：
 `status`（`2xx`…`5xx`、具体状态码、`ok`、`error`、`gqlerror`、`pending`）、`minMs`、
 `since`（`-5m`、`15:20`、ISO 时间，或一个 mark）、`all`（包含 Mixpanel / Firebase / Google 这类噪音请求）。
 
+GraphQL operation 也可以从 persisted query（APQ）请求和 GET 参数中识别。`@defer` 响应按段读取。
+persisted query 未命中且随后重试的，显示为 `↻ not persisted`，不算失败；`✗ no retry: not persisted`
+表示客户端一直没有发送 document。类型显示为 `?` 表示请求只发了 hash，类型未知。
+
 MCP 工具：`net_launch`、`net_sessions`、`net_list`（用 `cursor` 只取新增的请求）、
 `net_get`（`select`、`query`、`include`、`raw`、`redact`）、`net_ops`、`net_mark`、`net_wait`、
 `log_read`、`timeline`。
@@ -94,6 +98,7 @@ MCP 工具：`net_launch`、`net_sessions`、`net_list`（用 `cursor` 只取新
 - 请求由 SimPeek 自己的 session 重新发出（URLProtocol），所以认证质询走默认处理，
   重定向在内部跟随。响应从这个 session 的串行 delegate 队列交还给 app。
 - 只支持模拟器（dylib 是为 iOS 模拟器编译的）。
+- `@defer` 响应按段显示，不合并。不识别 GraphQL subscription 和上传。
 
 ## TODO
 
@@ -113,13 +118,10 @@ MCP 工具：`net_launch`、`net_sessions`、`net_list`（用 `cursor` 只取新
 
 GraphQL（Apollo iOS 及其他客户端）：
 
-- [ ] Persisted queries / APQ：不带 `query` 的请求（只有 `operationName` 和 `extensions.persistedQuery`）无法识别，而且预期内的第一次 `PersistedQueryNotFound` 响应会被显示为失败。
-- [ ] GET 请求：从 URL 读取 `query`、`operationName` 和 `variables`（Apollo 的 `useGETForQueries`、APQ 用 GET 重试）。
-- [ ] `multipart/mixed` 响应（`@defer`、基于 HTTP 的 subscription）：逐段解析，而不是当作非法 JSON 报失败。
+- [ ] session 里既没有类型 header 也没有 document 时，persisted query 的类型（目前显示为 `?`）。Apollo iOS 2.x 不发类型 header；它生成的代码里每个 operation 的 hash 就写在定义旁边，所以可以借助登记的源码目录查出类型。
+- [ ] 基于 HTTP 的 subscription（`multipart/mixed`）：需要录制端在收到每一段时就写入。
 - [ ] Multipart 上传：从 `operations` 字段读取 operation。
 - [ ] `Content-Type: application/graphql`（body 就是 document 本身）。
-- [ ] 以 fragment 定义开头的 document：找到 operation 定义来取名字和类型。
-- [ ] 单行 document 的源码定位，例如字符串字面量里的 `"query Foo { … }"`。
 - [ ] 同时通过 header 识别 GraphQL（`apollographql-client-name`、`Accept: application/graphql-response+json`），而不只靠 `/graphql` 路径或 `query` 字段。
 
 REST：

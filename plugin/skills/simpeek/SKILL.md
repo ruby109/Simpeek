@@ -36,6 +36,11 @@ Use the `net_*`, `log_read` and `timeline` MCP tools. The same commands exist on
   "what fails most".
 - `timeline` merges requests and logs by time. Use it when a log line and a request need to be
   put in order.
+- `↻ not persisted` is the first step of a persisted query; the retry with the same hash carries
+  the result, and `net_wait` skips it. `✗ no retry: not persisted` means the client never sent the
+  document. A type shown as `?` means the request sent only a hash.
+- A `@defer` response is shown as parts in `net_get`; `select` then starts at the part index, for
+  example `[1].incremental[0].data`.
 
 ## Limits
 

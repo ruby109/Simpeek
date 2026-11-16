@@ -73,6 +73,11 @@ Filters (CLI flags / MCP args): `op` (regex), `type`, `host`, `path`, `method`,
 `status` (`2xx`…`5xx`, a code, `ok`, `error`, `gqlerror`, `pending`), `minMs`,
 `since` (`-5m`, `15:20`, ISO, or a mark), `all` (include Mixpanel / Firebase / Google noise).
 
+GraphQL operations are also read from persisted-query (APQ) requests and GET parameters.
+`@defer` responses are read part by part. A persisted-query miss that is retried is shown as
+`↻ not persisted` and is not a failure; `✗ no retry: not persisted` means the client never sent the
+document. A type shown as `?` means the request sent only a hash and the type is not known.
+
 MCP tools: `net_launch`, `net_sessions`, `net_list` (with `cursor` for "what's new"),
 `net_get` (`select`, `query`, `include`, `raw`, `redact`), `net_ops`, `net_mark`, `net_wait`,
 `log_read`, `timeline`.
@@ -95,6 +100,8 @@ files on disk keep the raw values and are readable only by you (0600 / 0700).
   handling and redirects are followed internally. Responses are handed back to the app from that
   session's serial delegate queue.
 - Simulator only (the dylib is built for the iOS Simulator).
+- Deferred responses are shown part by part, not merged. GraphQL subscriptions and uploads are not
+  recognized.
 
 ## TODO
 
@@ -114,13 +121,10 @@ Capture and storage:
 
 GraphQL (Apollo iOS and other clients):
 
-- [ ] Persisted queries / APQ: requests without `query` (only `operationName` and `extensions.persistedQuery`) are not recognized, and the expected first `PersistedQueryNotFound` response is shown as a failure.
-- [ ] GET requests: read `query`, `operationName` and `variables` from the URL (Apollo `useGETForQueries`, APQ retries over GET).
-- [ ] `multipart/mixed` responses (`@defer`, subscriptions over HTTP): parse the parts instead of reporting invalid JSON as a failure.
+- [ ] Type of a persisted query when neither a type header nor the document is in the session (shown as `?`). Apollo iOS 2.x sends no type header; its generated code holds each operation's hash next to its definition, so the registered source directory could supply the type.
+- [ ] Subscriptions over HTTP (`multipart/mixed`): needs the recorder to write parts as they arrive.
 - [ ] Multipart uploads: read the operation from the `operations` field.
 - [ ] `Content-Type: application/graphql` (the body is the document itself).
-- [ ] Documents that start with fragment definitions: find the operation definition for the name and type.
-- [ ] Source lookup for single-line documents, e.g. `"query Foo { … }"` in a string literal.
 - [ ] Detect GraphQL by headers as well (`apollographql-client-name`, `Accept: application/graphql-response+json`), not only by a `/graphql` path or a `query` field.
 
 REST:
