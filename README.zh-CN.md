@@ -13,8 +13,9 @@ cli/src/logs/   日志模块（与网络模块相互独立）：app 日志文件
 
 不需要代理，不需要证书，也不用改 app 代码：simpeek 用 `DYLD_INSERT_LIBRARIES` 重新启动 app，
 注入的 dylib 每次启动写一个 NDJSON 文件到 `~/.simpeek/<bundleId>/<session>.ndjson`
-（每个请求一行 `start`、一行 `end`，字段沿用 HAR 1.2；超过 64KB 的 body 另存为
+（每个请求一行 `start`、一行 `end`，字段沿用 HAR 1.2；超过 64KB 或不是合法 UTF-8 的 body 另存为
 `~/.simpeek/<bundleId>/<session>/<id>.req|.res`）。每个 app 保留最近 20 次启动的记录。
+详见[工作原理](#工作原理)。
 
 ## 安装
 
@@ -91,6 +92,24 @@ MCP 工具：`net_launch`、`net_sessions`、`net_list`（用 `cursor` 只取新
 敏感信息（Authorization、Cookie、token/password 字段）默认显示为 `***`，传 `redact=false` 才显示原值；
 磁盘上的文件保留原始值，并且只有你自己可读（0600 / 0700）。
 
+写入这个会话的 app 已经退出时，`list` 和 `net_list` 会提示会话已结束，避免把 app 退出后的空列表误当成「什么都没录到」。
+
+## 工作原理
+
+1. **带着 dylib 启动。** `simpeek launch <bundle>` 先结束 app，再用 `xcrun simctl launch` 重新启动，
+   并设置 `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=<路径>/SimPeek.dylib`。`simctl` 会去掉
+   `SIMCTL_CHILD_` 前缀，把变量传给 app。模拟器里的 app 是 Mac 上的一个进程，所以 dylib 直接从
+   Mac 的文件系统加载（npm 包里放在 `vendor/` 下）。真机不允许这样注入，所以 simpeek 只支持模拟器；
+   dylib 只能在启动时加载，所以要重启 app。
+2. **在 `main()` 之前启动。** dyld 会执行 dylib 里的构造函数（`ios/Inject/inject.c`），它调用
+   `SimPeek.start()`：打开会话文件，用 method swizzling 把 `SimPeekURLProtocol` 插到每个 default 和
+   ephemeral `URLSessionConfiguration` 的 protocol classes 最前面，并全局注册，覆盖
+   `URLSession.shared`。如果 app 自己链接了 SimPeek 包并调用 `SimPeek.start()`，启动时加
+   `--no-inject`。app 环境变量里设 `SIMPEEK=0` 可以关闭录制。
+3. **拦截并转发。** `SimPeekURLProtocol` 接管每个 HTTP(S) 请求，写一行 `start`，再通过 SimPeek
+   自己的 session 重新发出（它的配置没有被 swizzle，所以不会被自己再拦一次）。响应、数据和完成事件按顺序交还给 app，
+   请求完成时写一行 `end`。CLI 和 MCP server 只读这些文件，不监听任何端口。
+
 ## 限制
 
 - 只支持 URLSession。后台 session（`URLSessionConfiguration.background`）、WebSocket task，
@@ -109,6 +128,7 @@ MCP 工具：`net_launch`、`net_sessions`、`net_list`（用 `cursor` 只取新
 
 抓取与存储：
 
+- [ ] 只观察 app 自己发出的请求，不再重新发送，让认证质询、重定向和时序跟没有 SimPeek 时完全一致（见「限制」）。
 - [ ] 不经 simpeek 重启也能录：把 `DYLD_INSERT_LIBRARIES` 设在模拟器的 `launchd` 上，之后启动的所有 app（包括扩展）从第一个请求起就被记录；因为影响整台模拟器，需要明确的开关和清理。
 - [ ] 导出 HAR（`simpeek har -o file.har`），让录下来的会话能直接在 Charles、Proxyman 或浏览器开发者工具里打开。
 - [ ] 单个会话的体积上限（总字节数、单个 body 的字节数），作为“保留最近 20 次启动”之外的限制。

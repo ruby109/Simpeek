@@ -13,8 +13,9 @@ cli/src/logs/   logs module (separate from network): app log files, stdout/stder
 
 No proxy, no certificates, no app code changes: the app is relaunched with
 `DYLD_INSERT_LIBRARIES`, and the dylib writes one NDJSON file per launch to
-`~/.simpeek/<bundleId>/<session>.ndjson` (HAR 1.2-shaped `start` / `end` lines; bodies over 64KB
-go to `~/.simpeek/<bundleId>/<session>/<id>.req|.res`). The newest 20 launches per app are kept.
+`~/.simpeek/<bundleId>/<session>.ndjson` (HAR 1.2-shaped `start` / `end` lines; bodies over 64KB,
+or not valid UTF-8, go to `~/.simpeek/<bundleId>/<session>/<id>.req|.res`). The newest 20 launches
+per app are kept. See [How it works](#how-it-works).
 
 ## Install
 
@@ -92,6 +93,29 @@ MCP tools: `net_launch`, `net_sessions`, `net_list` (with `cursor` for "what's n
 Secrets (Authorization, Cookie, token/password fields) are shown as `***` unless `redact=false`;
 files on disk keep the raw values and are readable only by you (0600 / 0700).
 
+`list` and `net_list` say when the app that wrote the session is no longer running, so an empty
+list after the app quit is not mistaken for "nothing recorded".
+
+## How it works
+
+1. **Launch with the dylib.** `simpeek launch <bundle>` terminates the app and starts it again with
+   `xcrun simctl launch`, setting `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=<path>/SimPeek.dylib`.
+   `simctl` drops the `SIMCTL_CHILD_` prefix and passes the variable to the app. A simulator app is
+   a process on the Mac, so the dylib is loaded straight from the Mac's file system (the npm package
+   ships it in `vendor/`). Devices do not allow this, which is why simpeek is simulator only, and the
+   dylib can only be loaded at launch, which is why the app is relaunched.
+2. **Start before `main()`.** dyld runs the dylib's constructor (`ios/Inject/inject.c`), which calls
+   `SimPeek.start()`: it opens the session file, puts `SimPeekURLProtocol` first in the protocol
+   classes of every default and ephemeral `URLSessionConfiguration` (method swizzling), and
+   registers it globally for `URLSession.shared`. Apps that link the SimPeek package call
+   `SimPeek.start()` themselves; launch those with `--no-inject`. `SIMPEEK=0` in the app's
+   environment turns recording off.
+3. **Intercept and forward.** `SimPeekURLProtocol` takes each HTTP(S) request, writes a `start`
+   line, and sends the request again through SimPeek's own session, whose configuration is left
+   unswizzled so the request is not intercepted twice. Response, data and completion are handed back to the app in order;
+   the `end` line is written on completion. The CLI and the MCP server only read the files; nothing
+   listens on a port.
+
 ## Limits
 
 - URLSession only. Background sessions (`URLSessionConfiguration.background`), WebSocket tasks,
@@ -112,6 +136,7 @@ Distribution:
 
 Capture and storage:
 
+- [ ] Observe the app's own requests instead of sending them again, so that auth challenges, redirects and timing behave exactly as without SimPeek (see "Limits").
 - [ ] Record without relaunching through simpeek: set `DYLD_INSERT_LIBRARIES` on the simulator's `launchd`, so that every app started afterwards is recorded from its first request (including extensions), with an explicit on/off switch and cleanup, since it affects the whole simulator.
 - [ ] HAR export (`simpeek har -o file.har`), so that a recorded session can be opened in Charles, Proxyman or browser developer tools.
 - [ ] Size limits per session (total bytes, and bytes per body), in addition to keeping the newest 20 launches.
